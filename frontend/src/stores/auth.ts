@@ -39,8 +39,10 @@ export const useAuthStore = defineStore("auth", () => {
   const user = ref<User | null>(null);
   const loading = ref(false);
   const errorMessage = ref("");
+  const accessToken = ref(localStorage.getItem("access_token"));
+  const refreshToken = ref(localStorage.getItem("refresh_token"));
 
-  const isAuthenticated = computed(() => Boolean(localStorage.getItem("access_token")));
+  const isAuthenticated = computed(() => Boolean(accessToken.value));
   const isAdmin = computed(() => user.value?.role === "admin" || user.value?.role === "superadmin");
   const isSuperadmin = computed(() => user.value?.role === "superadmin");
 
@@ -62,8 +64,7 @@ export const useAuthStore = defineStore("auth", () => {
     errorMessage.value = "";
     try {
       const { data } = await api.post<TokenPair>("/auth/login", payload);
-      localStorage.setItem("access_token", data.access_token);
-      localStorage.setItem("refresh_token", data.refresh_token);
+      setTokens(data.access_token, data.refresh_token);
       await fetchMe();
     } catch (error: any) {
       clearTokens();
@@ -87,8 +88,7 @@ export const useAuthStore = defineStore("auth", () => {
     }
     try {
       const { data } = await api.post<TokenPair>("/auth/refresh", { refresh_token: token });
-      localStorage.setItem("access_token", data.access_token);
-      localStorage.setItem("refresh_token", data.refresh_token);
+      setTokens(data.access_token, data.refresh_token);
       await fetchMe();
     } catch {
       logout();
@@ -101,8 +101,17 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   function clearTokens() {
+    accessToken.value = null;
+    refreshToken.value = null;
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
+  }
+
+  function setTokens(newAccessToken: string, newRefreshToken: string) {
+    accessToken.value = newAccessToken;
+    refreshToken.value = newRefreshToken;
+    localStorage.setItem("access_token", newAccessToken);
+    localStorage.setItem("refresh_token", newRefreshToken);
   }
 
   return {

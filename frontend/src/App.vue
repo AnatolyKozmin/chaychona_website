@@ -54,6 +54,7 @@ watch(
       </button>
       <nav v-if="auth.isAuthenticated" class="menu desktop-menu">
         <RouterLink to="/">Главная</RouterLink>
+        <RouterLink to="/standards">Стандарты</RouterLink>
         <RouterLink to="/my-tests">Мои тесты</RouterLink>
         <RouterLink to="/tasty-notebook">Вкусная тетрадь</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests">Тесты</RouterLink>
@@ -70,6 +71,7 @@ watch(
       </div>
       <nav class="mobile-sidebar-nav">
         <RouterLink to="/" @click="closeMobileMenu">Главная</RouterLink>
+        <RouterLink to="/standards" @click="closeMobileMenu">Стандарты</RouterLink>
         <RouterLink to="/my-tests" @click="closeMobileMenu">Мои тесты</RouterLink>
         <RouterLink to="/tasty-notebook" @click="closeMobileMenu">Вкусная тетрадь</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests" @click="closeMobileMenu">Тесты</RouterLink>

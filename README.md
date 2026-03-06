@@ -70,23 +70,42 @@ python3 backend/scripts/import_dishes_content.py \
   --verbose
 ```
 
-## Run in Docker (recommended)
+## Run in Docker (server profile)
 
 ```bash
 docker compose up --build
 ```
 
 Services:
-- Frontend: `http://localhost:5173`
+- Frontend: `http://localhost`
 - Backend API: `http://localhost:8000`
 - Swagger: `http://localhost:8000/docs`
-- PostgreSQL: `localhost:5432`
+- PostgreSQL: internal Docker network only
 
 To stop and remove volumes:
 
 ```bash
 docker compose down -v
 ```
+
+## Run in Docker (local dev profile)
+
+Local profile uses dedicated Dockerfiles with hot reload:
+- `backend/Dockerfile.local`
+- `frontend/Dockerfile.local`
+- `docker-compose.local.yml`
+
+Start:
+
+```bash
+docker compose -f docker-compose.local.yml up --build
+```
+
+Services:
+- Frontend (Vite dev): `http://localhost:5173`
+- Backend API: `http://localhost:8000`
+- Swagger: `http://localhost:8000/docs`
+- PostgreSQL: `localhost:5432`
 
 ## Local run (without Docker)
 
