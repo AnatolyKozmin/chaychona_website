@@ -6,8 +6,6 @@ services:
       POSTGRES_DB: restaurant_training
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,12 +20,12 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/restaurant_training
-      JWT_SECRET_KEY: change_me_to_long_random_secret
+      JWT_SECRET_KEY: CHANGE_ME_TO_LONG_RANDOM_SECRET
       JWT_ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: 30
       REFRESH_TOKEN_EXPIRE_DAYS: 7
       BOOTSTRAP_SUPERADMIN_EMAIL: owner@example.com
-      BOOTSTRAP_SUPERADMIN_PASSWORD: change_me_please
+      BOOTSTRAP_SUPERADMIN_PASSWORD: CHANGE_ME_PLEASE
       CONTENT_EXPORT_ROOT: /import/content_export
     depends_on:
       db:
@@ -35,18 +33,19 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ../first_bot/app_from_container/content_export:/import/content_export:ro
+      - ./content_export:/import/content_export:ro
+      - ./backend/media_uploads:/app/media_uploads
 
   frontend:
     build:
       context: ./frontend
       args:
-        VITE_API_BASE_URL: http://localhost:8000/api/v1
+        VITE_API_BASE_URL: http://194.87.140.241:8000/api/v1
     restart: unless-stopped
     depends_on:
       - backend
     ports:
-      - "5173:80"
+      - "80:80"
 
 volumes:
   pg_data:
