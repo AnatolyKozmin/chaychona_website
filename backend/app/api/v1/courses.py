@@ -2,6 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
@@ -90,7 +91,23 @@ def _build_course_public(db: Session, course: Course) -> CoursePublic:
     )
 
 
+def _normalize_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _normalize_required_text(value: str | None, field_name: str) -> str:
+    normalized = _normalize_optional_text(value)
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Поле {field_name} не может быть пустым")
+    return normalized
+
+
 def _replace_blocks(db: Session, course_id: int, blocks_data):
+    if not blocks_data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Добавьте хотя бы один блок")
     existing = list(db.scalars(select(CourseBlock).where(CourseBlock.course_id == course_id)).all())
     for block in existing:
         subblocks = list(db.scalars(select(CourseSubBlock).where(CourseSubBlock.block_id == block.id)).all())
@@ -99,22 +116,23 @@ def _replace_blocks(db: Session, course_id: int, blocks_data):
         db.delete(block)
     db.flush()
     for idx, block in enumerate(blocks_data):
+        subblocks_data = getattr(block, "subblocks", None) or []
         db_block = CourseBlock(
             course_id=course_id,
-            heading=block.heading.strip() if block.heading else None,
-            text=block.text.strip(),
-            image_path=block.image_path.strip() if block.image_path else None,
+            heading=_normalize_optional_text(getattr(block, "heading", None)),
+            text=_normalize_required_text(getattr(block, "text", None), "text"),
+            image_path=_normalize_optional_text(getattr(block, "image_path", None)),
             sort_order=block.sort_order if block.sort_order is not None else idx,
         )
         db.add(db_block)
         db.flush([db_block])
-        for sub_idx, sub in enumerate(block.subblocks):
+        for sub_idx, sub in enumerate(subblocks_data):
             db.add(
                 CourseSubBlock(
                     block_id=db_block.id,
-                    heading=sub.heading.strip() if sub.heading else None,
-                    text=sub.text.strip(),
-                    image_path=sub.image_path.strip() if sub.image_path else None,
+                    heading=_normalize_optional_text(getattr(sub, "heading", None)),
+                    text=_normalize_required_text(getattr(sub, "text", None), "subblock.text"),
+                    image_path=_normalize_optional_text(getattr(sub, "image_path", None)),
                     sort_order=sub.sort_order if sub.sort_order is not None else sub_idx,
                 )
             )
@@ -157,9 +175,16 @@ def create_course_admin(
         is_active=payload.is_active,
     )
     db.add(course)
-    db.flush([course])
-    _replace_blocks(db, course.id, payload.blocks)
-    db.commit()
+    try:
+        db.flush([course])
+        _replace_blocks(db, course.id, payload.blocks)
+        db.commit()
+    except (SQLAlchemyError, HTTPException):
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Ошибка сохранения курса: {exc}") from exc
     return _build_course_public(db, course)
 
 
@@ -192,8 +217,15 @@ def update_course_admin(
     course.job_title_id = job_title_id
     course.linked_test_id = payload.linked_test_id
     course.is_active = payload.is_active
-    _replace_blocks(db, course.id, payload.blocks)
-    db.commit()
+    try:
+        _replace_blocks(db, course.id, payload.blocks)
+        db.commit()
+    except (SQLAlchemyError, HTTPException):
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Ошибка обновления курса: {exc}") from exc
     return _build_course_public(db, course)
 
 
