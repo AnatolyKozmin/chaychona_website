@@ -29,3 +29,14 @@ class CourseBlock(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     image_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class CourseSubBlock(Base):
+    __tablename__ = "course_subblocks"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    block_id: Mapped[int] = mapped_column(ForeignKey("course_blocks.id"), nullable=False, index=True)
+    heading: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    image_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

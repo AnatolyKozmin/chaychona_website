@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.db.session import get_db
-from app.models.course import Course, CourseBlock
+from app.models.course import Course, CourseBlock, CourseSubBlock
 from app.models.quiz import QuizTest
 from app.models.user import JobTitleCatalog, RestaurantCatalog, Role, User
 from app.schemas.course import (
@@ -14,6 +14,7 @@ from app.schemas.course import (
     CourseCreate,
     CourseLinkedTestPublic,
     CoursePublic,
+    CourseSubBlockPublic,
 )
 
 router = APIRouter(prefix="/courses", tags=["courses"])
@@ -45,6 +46,35 @@ def _build_course_public(db: Session, course: Course) -> CoursePublic:
     blocks = list(
         db.scalars(select(CourseBlock).where(CourseBlock.course_id == course.id).order_by(CourseBlock.sort_order.asc())).all()
     )
+    blocks_public: list[CourseBlockPublic] = []
+    for block in blocks:
+        subblocks = list(
+            db.scalars(
+                select(CourseSubBlock).where(CourseSubBlock.block_id == block.id).order_by(CourseSubBlock.sort_order.asc())
+            ).all()
+        )
+        blocks_public.append(
+            CourseBlockPublic(
+                id=block.id,
+                heading=block.heading,
+                text=block.text,
+                image_path=block.image_path,
+                image_url=_media_url(block.image_path),
+                sort_order=block.sort_order,
+                subblocks=[
+                    CourseSubBlockPublic(
+                        id=sub.id,
+                        heading=sub.heading,
+                        text=sub.text,
+                        image_path=sub.image_path,
+                        image_url=_media_url(sub.image_path),
+                        sort_order=sub.sort_order,
+                    )
+                    for sub in subblocks
+                ],
+            )
+        )
+
     return CoursePublic(
         id=course.id,
         title=course.title,
@@ -56,35 +86,38 @@ def _build_course_public(db: Session, course: Course) -> CoursePublic:
         linked_test=CourseLinkedTestPublic(id=linked_test.id, title=linked_test.title) if linked_test else None,
         is_active=course.is_active,
         created_at=course.created_at,
-        blocks=[
-            CourseBlockPublic(
-                id=block.id,
-                heading=block.heading,
-                text=block.text,
-                image_path=block.image_path,
-                image_url=_media_url(block.image_path),
-                sort_order=block.sort_order,
-            )
-            for block in blocks
-        ],
+        blocks=blocks_public,
     )
 
 
 def _replace_blocks(db: Session, course_id: int, blocks_data):
     existing = list(db.scalars(select(CourseBlock).where(CourseBlock.course_id == course_id)).all())
     for block in existing:
+        subblocks = list(db.scalars(select(CourseSubBlock).where(CourseSubBlock.block_id == block.id)).all())
+        for subblock in subblocks:
+            db.delete(subblock)
         db.delete(block)
     db.flush()
     for idx, block in enumerate(blocks_data):
-        db.add(
-            CourseBlock(
-                course_id=course_id,
-                heading=block.heading.strip() if block.heading else None,
-                text=block.text.strip(),
-                image_path=block.image_path.strip() if block.image_path else None,
-                sort_order=block.sort_order if block.sort_order is not None else idx,
-            )
+        db_block = CourseBlock(
+            course_id=course_id,
+            heading=block.heading.strip() if block.heading else None,
+            text=block.text.strip(),
+            image_path=block.image_path.strip() if block.image_path else None,
+            sort_order=block.sort_order if block.sort_order is not None else idx,
         )
+        db.add(db_block)
+        db.flush([db_block])
+        for sub_idx, sub in enumerate(block.subblocks):
+            db.add(
+                CourseSubBlock(
+                    block_id=db_block.id,
+                    heading=sub.heading.strip() if sub.heading else None,
+                    text=sub.text.strip(),
+                    image_path=sub.image_path.strip() if sub.image_path else None,
+                    sort_order=sub.sort_order if sub.sort_order is not None else sub_idx,
+                )
+            )
 
 
 @router.get("/admin", response_model=list[CoursePublic])
@@ -175,6 +208,9 @@ def delete_course_admin(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Курс не найден")
     blocks = list(db.scalars(select(CourseBlock).where(CourseBlock.course_id == course.id)).all())
     for block in blocks:
+        subblocks = list(db.scalars(select(CourseSubBlock).where(CourseSubBlock.block_id == block.id)).all())
+        for subblock in subblocks:
+            db.delete(subblock)
         db.delete(block)
     db.delete(course)
     db.commit()

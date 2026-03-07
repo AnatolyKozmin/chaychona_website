@@ -1,12 +1,23 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 
 interface DishCategory {
   id: number;
   name: string;
+  restaurant_id?: string | null;
+  branch_id?: number | null;
   menu_type: string | null;
+  description?: string | null;
+  is_active?: boolean;
+}
+
+interface MenuBranch {
+  id: number;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
 }
 
 interface DishCard {
@@ -62,16 +73,32 @@ const adminSuccess = ref("");
 const restaurants = ref<RestaurantItem[]>([]);
 const adminCategories = ref<DishCategory[]>([]);
 const adminDishes = ref<DishAdminItem[]>([]);
-const dishFilterRestaurant = ref("");
-const dishFilterCategory = ref("");
+const menuBranches = ref<MenuBranch[]>([]);
 const editingDishId = ref<number | null>(null);
 const editingCategoryId = ref<number | null>(null);
+const editingBranchId = ref<number | null>(null);
+const categoryModalOpen = ref(false);
+const dishModalOpen = ref(false);
+const branchModalOpen = ref(false);
+const selectedRestaurantTab = ref("all");
+const openedCategoryIds = ref<Array<number | string>>([]);
+const selectedCategorySubmenu = ref("all");
+const categoriesPanelOpen = ref(false);
+const categorySearch = ref("");
 
 const categoryForm = reactive({
   name: "",
+  restaurant_id: "",
+  branch_id: "",
   menu_type: "",
   description: "",
   is_active: true
+});
+
+const branchForm = reactive({
+  name: "",
+  is_active: true,
+  sort_order: 0
 });
 
 const dishForm = reactive({
@@ -94,6 +121,73 @@ const currentDish = computed(() => dishes.value[currentIndex.value] ?? null);
 const hasNext = computed(() => currentIndex.value < dishes.value.length - 1);
 const hasPrev = computed(() => currentIndex.value > 0);
 const isSuperadmin = computed(() => auth.isSuperadmin);
+const restaurantTabs = computed(() => [{ id: "all", name: "Все рестораны" }, ...restaurants.value]);
+const restaurantNameById = computed(() => {
+  const map = new Map<string, string>();
+  for (const restaurant of restaurants.value) {
+    map.set(restaurant.id, restaurant.name);
+  }
+  return map;
+});
+const dishesForSelectedRestaurant = computed(() =>
+  adminDishes.value.filter((dish) => selectedRestaurantTab.value === "all" || dish.restaurant_id === selectedRestaurantTab.value)
+);
+const selectedRestaurantStats = computed(() => {
+  const total = dishesForSelectedRestaurant.value.length;
+  const active = dishesForSelectedRestaurant.value.filter((dish) => dish.is_active).length;
+  const inactive = total - active;
+  return { total, active, inactive };
+});
+const filteredAdminCategories = computed(() => {
+  const query = categorySearch.value.trim().toLowerCase();
+  if (!query) {
+    return adminCategories.value;
+  }
+  return adminCategories.value.filter((category) => {
+    const name = category.name.toLowerCase();
+    const type = (category.menu_type || "").toLowerCase();
+    return name.includes(query) || type.includes(query);
+  });
+});
+const categoryBranchOptions = computed(() => menuBranches.value.filter((branch) => branch.is_active || branch.id === Number(categoryForm.branch_id)));
+const categoriesForDishForm = computed(() =>
+  adminCategories.value.filter((category) => {
+    if (!dishForm.restaurant_id) {
+      return true;
+    }
+    return !category.restaurant_id || category.restaurant_id === dishForm.restaurant_id;
+  })
+);
+const groupedDishes = computed(() => {
+  const groups = new Map<
+    number | string,
+    { id: number | string; name: string; dishes: DishAdminItem[]; activeCount: number; inactiveCount: number }
+  >();
+  for (const dish of dishesForSelectedRestaurant.value) {
+    const key = dish.category_id ?? "uncategorized";
+    const name = dish.category?.name || "Без категории";
+    if (!groups.has(key)) {
+      groups.set(key, { id: key, name, dishes: [], activeCount: 0, inactiveCount: 0 });
+    }
+    const group = groups.get(key)!;
+    group.dishes.push(dish);
+    if (dish.is_active) {
+      group.activeCount += 1;
+    } else {
+      group.inactiveCount += 1;
+    }
+  }
+  return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name));
+});
+const categorySubmenuItems = computed(() =>
+  groupedDishes.value.map((group) => ({ key: String(group.id), name: group.name, count: group.dishes.length }))
+);
+const visibleGroups = computed(() => {
+  if (selectedCategorySubmenu.value === "all") {
+    return groupedDishes.value;
+  }
+  return groupedDishes.value.filter((group) => String(group.id) === selectedCategorySubmenu.value);
+});
 
 function toMediaUrl(path: string | null): string | null {
   if (!path) {
@@ -152,22 +246,37 @@ async function loadAdminCategories() {
   }
 }
 
+async function loadMenuBranches() {
+  const { data } = await api.get<MenuBranch[]>("/menu/admin/branches");
+  menuBranches.value = data;
+  if (!categoryForm.branch_id) {
+    const firstActive = data.find((branch) => branch.is_active);
+    categoryForm.branch_id = firstActive ? String(firstActive.id) : "";
+  }
+}
+
 async function loadAdminDishes() {
-  const { data } = await api.get<DishAdminItem[]>("/menu/admin/dishes", {
-    params: {
-      restaurant_id: dishFilterRestaurant.value || undefined,
-      category_id: dishFilterCategory.value || undefined
-    }
-  });
+  const { data } = await api.get<DishAdminItem[]>("/menu/admin/dishes");
   adminDishes.value = data;
+  const availableIds = new Set(groupedDishes.value.map((group) => group.id));
+  openedCategoryIds.value = openedCategoryIds.value.filter((id) => availableIds.has(id));
 }
 
 function resetCategoryForm() {
   editingCategoryId.value = null;
   categoryForm.name = "";
+  categoryForm.restaurant_id = "";
+  categoryForm.branch_id = "";
   categoryForm.menu_type = "";
   categoryForm.description = "";
   categoryForm.is_active = true;
+}
+
+function resetBranchForm() {
+  editingBranchId.value = null;
+  branchForm.name = "";
+  branchForm.is_active = true;
+  branchForm.sort_order = 0;
 }
 
 function resetDishForm() {
@@ -190,9 +299,48 @@ function resetDishForm() {
 function startEditCategory(category: DishCategory & { description?: string | null; is_active?: boolean }) {
   editingCategoryId.value = category.id;
   categoryForm.name = category.name;
+  categoryForm.restaurant_id = category.restaurant_id || "";
+  categoryForm.branch_id = category.branch_id ? String(category.branch_id) : "";
   categoryForm.menu_type = category.menu_type || "";
   categoryForm.description = category.description || "";
   categoryForm.is_active = category.is_active ?? true;
+}
+
+function startEditBranch(branch: MenuBranch) {
+  editingBranchId.value = branch.id;
+  branchForm.name = branch.name;
+  branchForm.is_active = branch.is_active;
+  branchForm.sort_order = branch.sort_order;
+}
+
+function openCreateCategoryModal() {
+  resetCategoryForm();
+  categoryModalOpen.value = true;
+}
+
+function openEditCategoryModal(category: DishCategory & { description?: string | null; is_active?: boolean }) {
+  startEditCategory(category);
+  categoryModalOpen.value = true;
+}
+
+function openCreateBranchModal() {
+  resetBranchForm();
+  branchModalOpen.value = true;
+}
+
+function openEditBranchModal(branch: MenuBranch) {
+  startEditBranch(branch);
+  branchModalOpen.value = true;
+}
+
+function openCreateDishModal() {
+  resetDishForm();
+  dishModalOpen.value = true;
+}
+
+function openEditDishModal(dish: DishAdminItem) {
+  startEditDish(dish);
+  dishModalOpen.value = true;
 }
 
 function startEditDish(dish: DishAdminItem) {
@@ -219,6 +367,8 @@ async function saveCategory() {
   try {
     const payload = {
       name: categoryForm.name,
+      restaurant_id: categoryForm.restaurant_id || null,
+      branch_id: categoryForm.branch_id ? Number(categoryForm.branch_id) : null,
       menu_type: categoryForm.menu_type || null,
       description: categoryForm.description || null,
       is_active: categoryForm.is_active
@@ -232,9 +382,62 @@ async function saveCategory() {
     }
     await loadCategories();
     await loadAdminCategories();
+    await loadMenuBranches();
     resetCategoryForm();
+    categoryModalOpen.value = false;
   } catch (e: any) {
     adminError.value = e?.response?.data?.detail ?? "Не удалось сохранить категорию";
+  } finally {
+    adminLoading.value = false;
+  }
+}
+
+async function saveBranch() {
+  adminLoading.value = true;
+  adminError.value = "";
+  adminSuccess.value = "";
+  try {
+    const payload = {
+      name: branchForm.name,
+      is_active: branchForm.is_active,
+      sort_order: Number(branchForm.sort_order) || 0
+    };
+    if (editingBranchId.value) {
+      await api.put(`/menu/admin/branches/${editingBranchId.value}`, payload);
+      adminSuccess.value = "Ветка обновлена";
+    } else {
+      await api.post("/menu/admin/branches", payload);
+      adminSuccess.value = "Ветка создана";
+    }
+    await loadMenuBranches();
+    await loadAdminCategories();
+    resetBranchForm();
+    branchModalOpen.value = false;
+  } catch (e: any) {
+    adminError.value = e?.response?.data?.detail ?? "Не удалось сохранить ветку";
+  } finally {
+    adminLoading.value = false;
+  }
+}
+
+async function deleteBranch(branchId: number) {
+  const ok = window.confirm("Удалить ветку? У категорий ветка будет очищена.");
+  if (!ok) {
+    return;
+  }
+  adminLoading.value = true;
+  adminError.value = "";
+  adminSuccess.value = "";
+  try {
+    await api.delete(`/menu/admin/branches/${branchId}`);
+    adminSuccess.value = "Ветка удалена";
+    await loadMenuBranches();
+    await loadAdminCategories();
+    if (editingBranchId.value === branchId) {
+      resetBranchForm();
+    }
+  } catch (e: any) {
+    adminError.value = e?.response?.data?.detail ?? "Не удалось удалить ветку";
   } finally {
     adminLoading.value = false;
   }
@@ -315,6 +518,7 @@ async function saveDish() {
     await loadAdminDishes();
     await loadDishes();
     resetDishForm();
+    dishModalOpen.value = false;
   } catch (e: any) {
     adminError.value = e?.response?.data?.detail ?? "Не удалось сохранить позицию";
   } finally {
@@ -347,6 +551,36 @@ async function deleteDish(dishId: number) {
 
 function onCategoryChange() {
   void loadDishes();
+}
+
+function setRestaurantTab(tabId: string) {
+  selectedRestaurantTab.value = tabId;
+  selectedCategorySubmenu.value = "all";
+  openedCategoryIds.value = [];
+}
+
+function setCategorySubmenu(categoryKey: string) {
+  selectedCategorySubmenu.value = categoryKey;
+  openedCategoryIds.value = [];
+}
+
+function toggleCategoryGroup(groupId: number | string) {
+  if (openedCategoryIds.value.includes(groupId)) {
+    openedCategoryIds.value = openedCategoryIds.value.filter((item) => item !== groupId);
+    return;
+  }
+  openedCategoryIds.value.push(groupId);
+}
+
+function isCategoryGroupOpen(groupId: number | string): boolean {
+  return openedCategoryIds.value.includes(groupId);
+}
+
+function getRestaurantName(restaurantId: string | null): string {
+  if (!restaurantId) {
+    return "-";
+  }
+  return restaurantNameById.value.get(restaurantId) || "-";
 }
 
 function goNext() {
@@ -396,10 +630,49 @@ onMounted(() => {
   void loadDishes();
   if (isSuperadmin.value) {
     void loadRestaurants();
+    void loadMenuBranches();
     void loadAdminCategories();
     void loadAdminDishes();
   }
 });
+
+watch(
+  () => isSuperadmin.value,
+  (enabled) => {
+    if (!enabled) {
+      return;
+    }
+    void loadRestaurants();
+    void loadMenuBranches();
+    void loadAdminCategories();
+    void loadAdminDishes();
+  }
+);
+
+watch(
+  () => groupedDishes.value.map((group) => String(group.id)).join("|"),
+  () => {
+    const existingIds = new Set(groupedDishes.value.map((group) => group.id));
+    openedCategoryIds.value = openedCategoryIds.value.filter((id) => existingIds.has(id));
+  }
+);
+
+watch(
+  () => dishForm.restaurant_id,
+  (restaurantId) => {
+    if (!dishForm.category_id) {
+      return;
+    }
+    const selected = adminCategories.value.find((item) => String(item.id) === dishForm.category_id);
+    if (!selected) {
+      dishForm.category_id = "";
+      return;
+    }
+    if (restaurantId && selected.restaurant_id && selected.restaurant_id !== restaurantId) {
+      dishForm.category_id = "";
+    }
+  }
+);
 </script>
 
 <template>
@@ -476,12 +749,140 @@ onMounted(() => {
     <p v-if="adminSuccess" class="muted">{{ adminSuccess }}</p>
 
     <div class="card">
-      <h3>Категории</h3>
+      <div class="actions-row">
+        <h3 style="margin: 0">Категории</h3>
+        <div class="actions-row">
+          <button type="button" class="ghost" @click="categoriesPanelOpen = !categoriesPanelOpen">
+            {{ categoriesPanelOpen ? "Скрыть список" : "Показать список" }}
+          </button>
+          <button type="button" class="ghost" @click="openCreateBranchModal">Ветки меню</button>
+          <button type="button" @click="openCreateCategoryModal">Создать категорию</button>
+        </div>
+      </div>
+      <div v-if="categoriesPanelOpen" class="menu-category-panel">
+        <label>Поиск по категориям</label>
+        <input v-model="categorySearch" placeholder="Название или ветка" />
+        <div class="menu-category-list">
+          <div class="menu-category-item" v-for="cat in filteredAdminCategories" :key="cat.id">
+            <div>
+              <strong>{{ cat.name }}</strong>
+              <p class="muted" style="margin: 4px 0 0 0">
+                {{ cat.menu_type || "без ветки" }} · {{ getRestaurantName(cat.restaurant_id || null) }}
+              </p>
+            </div>
+            <div class="actions-row">
+              <button type="button" class="ghost" @click="openEditCategoryModal(cat)">Редактировать</button>
+              <button type="button" @click="deleteCategory(cat.id)">Удалить</button>
+            </div>
+          </div>
+          <p v-if="filteredAdminCategories.length === 0" class="muted">Категории не найдены.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin: 0">Позиции</h3>
+
+      <div class="menu-toolbar">
+        <div class="menu-toolbar-left">
+          <div class="restaurant-tabs">
+            <button
+              v-for="tab in restaurantTabs"
+              :key="tab.id"
+              type="button"
+              class="restaurant-tab"
+              :class="{ active: selectedRestaurantTab === tab.id }"
+              @click="setRestaurantTab(tab.id)"
+            >
+              {{ tab.name }}
+            </button>
+          </div>
+          <div class="category-submenu">
+            <button
+              type="button"
+              class="category-submenu-tab"
+              :class="{ active: selectedCategorySubmenu === 'all' }"
+              @click="setCategorySubmenu('all')"
+            >
+              Все категории
+            </button>
+            <button
+              v-for="item in categorySubmenuItems"
+              :key="item.key"
+              type="button"
+              class="category-submenu-tab"
+              :class="{ active: selectedCategorySubmenu === item.key }"
+              @click="setCategorySubmenu(item.key)"
+            >
+              {{ item.name }} ({{ item.count }})
+            </button>
+          </div>
+        </div>
+        <button type="button" class="menu-add-btn" @click="openCreateDishModal">+ Новая позиция</button>
+      </div>
+      <div class="menu-stats-row">
+        <span class="status-chip">Всего: {{ selectedRestaurantStats.total }}</span>
+        <span class="status-chip status-chip-success">Активных: {{ selectedRestaurantStats.active }}</span>
+        <span class="status-chip status-chip-muted">Неактивных: {{ selectedRestaurantStats.inactive }}</span>
+      </div>
+
+      <div class="menu-accordion" style="margin-top: 10px">
+        <div class="menu-group" v-for="group in visibleGroups" :key="group.id">
+          <button type="button" class="menu-group-header" @click="toggleCategoryGroup(group.id)">
+            <span>{{ group.name }}</span>
+            <span class="menu-group-meta">
+              <span class="status-chip">{{ group.dishes.length }} поз.</span>
+              <span class="status-chip status-chip-success">{{ group.activeCount }} акт.</span>
+              <span class="status-chip status-chip-muted">{{ group.inactiveCount }} неакт.</span>
+            </span>
+          </button>
+          <div v-if="isCategoryGroupOpen(group.id)" class="menu-group-body">
+            <div class="menu-dish-row" v-for="dish in group.dishes" :key="dish.id">
+              <div>
+                <strong>{{ dish.name }}</strong>
+                <p class="muted" style="margin: 4px 0 0 0">
+                  {{ getRestaurantName(dish.restaurant_id) }} · фото:
+                  {{ dish.photo_dish_path ? "да" : "нет" }} · аудио: {{ dish.audio_path ? "да" : "нет" }} · видео:
+                  {{ dish.video_path ? "да" : "нет" }}
+                </p>
+              </div>
+              <div class="actions-row">
+                <button type="button" class="ghost" @click="openEditDishModal(dish)">Редактировать</button>
+                <button type="button" @click="deleteDish(dish.id)">Удалить</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p v-if="groupedDishes.length === 0" class="muted">Для выбранного ресторана пока нет позиций.</p>
+        <p v-else-if="visibleGroups.length === 0" class="muted">В выбранной категории пока нет позиций.</p>
+      </div>
+    </div>
+  </section>
+
+  <div v-if="categoryModalOpen" class="modal-backdrop" @click.self="categoryModalOpen = false">
+    <div class="modal-window">
+      <div class="actions-row">
+        <h3 style="margin: 0">{{ editingCategoryId ? "Редактирование категории" : "Новая категория" }}</h3>
+        <button type="button" class="ghost" @click="categoryModalOpen = false">Закрыть</button>
+      </div>
       <form @submit.prevent="saveCategory">
         <label>Название категории</label>
         <input v-model="categoryForm.name" required />
-        <label>Тип меню</label>
-        <input v-model="categoryForm.menu_type" placeholder="kitchen / bar" />
+        <label>Ресторан</label>
+        <select v-model="categoryForm.restaurant_id">
+          <option value="">Все рестораны</option>
+          <option v-for="r in restaurants" :key="r.id" :value="r.id">{{ r.name }}</option>
+        </select>
+        <label>Ветка меню</label>
+        <div class="inline-select-actions">
+          <select v-model="categoryForm.branch_id">
+            <option value="">Без ветки</option>
+            <option v-for="branch in categoryBranchOptions" :key="branch.id" :value="String(branch.id)">
+              {{ branch.name }}
+            </option>
+          </select>
+          <button type="button" class="ghost" @click="openCreateBranchModal">Управлять ветками</button>
+        </div>
         <label>Описание</label>
         <input v-model="categoryForm.description" />
         <label>
@@ -490,38 +891,17 @@ onMounted(() => {
         </label>
         <div class="actions-row" style="margin-top: 10px">
           <button type="submit" :disabled="adminLoading">{{ editingCategoryId ? "Сохранить" : "Создать" }}</button>
-          <button type="button" class="ghost" @click="resetCategoryForm">Сброс</button>
+          <button type="button" class="ghost" @click="openCreateCategoryModal">Очистить</button>
         </div>
       </form>
-      <div class="table-wrap" style="margin-top: 10px">
-        <table>
-          <thead>
-            <tr>
-              <th>Название</th>
-              <th>Тип</th>
-              <th>Действия</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="cat in adminCategories" :key="cat.id">
-              <td>{{ cat.name }}</td>
-              <td>{{ cat.menu_type || "-" }}</td>
-              <td>
-                <div class="actions-row">
-                  <button type="button" class="ghost" @click="startEditCategory(cat)">Редактировать</button>
-                  <button type="button" @click="deleteCategory(cat.id)">Удалить</button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
     </div>
+  </div>
 
-    <div class="card">
+  <div v-if="dishModalOpen" class="modal-backdrop" @click.self="dishModalOpen = false">
+    <div class="modal-window modal-window-wide">
       <div class="actions-row">
-        <h3 style="margin: 0">Позиции</h3>
-        <button type="button" class="ghost" @click="resetDishForm">Новая позиция</button>
+        <h3 style="margin: 0">{{ editingDishId ? "Редактирование позиции" : "Новая позиция" }}</h3>
+        <button type="button" class="ghost" @click="dishModalOpen = false">Закрыть</button>
       </div>
       <form @submit.prevent="saveDish">
         <label>Название</label>
@@ -534,7 +914,9 @@ onMounted(() => {
         <label>Категория</label>
         <select v-model="dishForm.category_id">
           <option value="">Без категории</option>
-          <option v-for="cat in adminCategories" :key="cat.id" :value="String(cat.id)">{{ cat.name }}</option>
+          <option v-for="cat in categoriesForDishForm" :key="cat.id" :value="String(cat.id)">
+            {{ cat.name }}{{ cat.menu_type ? ` (${cat.menu_type})` : "" }}
+          </option>
         </select>
         <label>Описание</label>
         <input v-model="dishForm.description" />
@@ -585,58 +967,45 @@ onMounted(() => {
 
         <div class="actions-row" style="margin-top: 10px">
           <button type="submit" :disabled="adminLoading">{{ editingDishId ? "Сохранить" : "Создать" }}</button>
-          <button type="button" class="ghost" @click="resetDishForm">Сброс</button>
+          <button type="button" class="ghost" @click="openCreateDishModal">Очистить</button>
         </div>
       </form>
+    </div>
+  </div>
 
-      <div class="actions-row" style="margin-top: 12px">
-        <div style="flex: 1">
-          <label>Фильтр по ресторану</label>
-          <select v-model="dishFilterRestaurant" @change="loadAdminDishes">
-            <option value="">Все рестораны</option>
-            <option v-for="r in restaurants" :key="r.id" :value="r.id">{{ r.name }}</option>
-          </select>
-        </div>
-        <div style="flex: 1">
-          <label>Фильтр по категории</label>
-          <select v-model="dishFilterCategory" @change="loadAdminDishes">
-            <option value="">Все категории</option>
-            <option v-for="cat in adminCategories" :key="cat.id" :value="String(cat.id)">{{ cat.name }}</option>
-          </select>
-        </div>
+  <div v-if="branchModalOpen" class="modal-backdrop" @click.self="branchModalOpen = false">
+    <div class="modal-window">
+      <div class="actions-row">
+        <h3 style="margin: 0">{{ editingBranchId ? "Редактирование ветки" : "Новая ветка меню" }}</h3>
+        <button type="button" class="ghost" @click="branchModalOpen = false">Закрыть</button>
       </div>
-
-      <div class="table-wrap" style="margin-top: 10px">
-        <table>
-          <thead>
-            <tr>
-              <th>Название</th>
-              <th>Ресторан</th>
-              <th>Категория</th>
-              <th>Медиа</th>
-              <th>Действия</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="dish in adminDishes" :key="dish.id">
-              <td>{{ dish.name }}</td>
-              <td>{{ restaurants.find((r) => r.id === dish.restaurant_id)?.name || "-" }}</td>
-              <td>{{ dish.category?.name || "-" }}</td>
-              <td>
-                фото: {{ dish.photo_dish_path ? "да" : "нет" }},
-                аудио: {{ dish.audio_path ? "да" : "нет" }},
-                видео: {{ dish.video_path ? "да" : "нет" }}
-              </td>
-              <td>
-                <div class="actions-row">
-                  <button type="button" class="ghost" @click="startEditDish(dish)">Редактировать</button>
-                  <button type="button" @click="deleteDish(dish.id)">Удалить</button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <form @submit.prevent="saveBranch">
+        <label>Название ветки</label>
+        <input v-model="branchForm.name" placeholder="Кухня, Бар, Десерты..." required />
+        <label>Порядок</label>
+        <input v-model.number="branchForm.sort_order" type="number" min="0" />
+        <label>
+          <input type="checkbox" v-model="branchForm.is_active" />
+          Активная
+        </label>
+        <div class="actions-row" style="margin-top: 10px">
+          <button type="submit" :disabled="adminLoading">{{ editingBranchId ? "Сохранить" : "Создать" }}</button>
+          <button type="button" class="ghost" @click="openCreateBranchModal">Очистить</button>
+        </div>
+      </form>
+      <div class="menu-category-list" style="margin-top: 12px">
+        <div class="menu-category-item" v-for="branch in menuBranches" :key="branch.id">
+          <div>
+            <strong>{{ branch.name }}</strong>
+            <p class="muted" style="margin: 4px 0 0 0">Порядок: {{ branch.sort_order }}</p>
+          </div>
+          <div class="actions-row">
+            <button type="button" class="ghost" @click="openEditBranchModal(branch)">Редактировать</button>
+            <button type="button" @click="deleteBranch(branch.id)">Удалить</button>
+          </div>
+        </div>
+        <p v-if="menuBranches.length === 0" class="muted">Пока нет веток меню.</p>
       </div>
     </div>
-  </section>
+  </div>
 </template>

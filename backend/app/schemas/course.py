@@ -8,6 +8,14 @@ class CourseBlockCreate(BaseModel):
     text: str = Field(min_length=1, max_length=20000)
     image_path: str | None = Field(default=None, max_length=1024)
     sort_order: int = 0
+    subblocks: list["CourseSubBlockCreate"] = Field(default_factory=list)
+
+
+class CourseSubBlockCreate(BaseModel):
+    heading: str | None = Field(default=None, max_length=255)
+    text: str = Field(min_length=1, max_length=20000)
+    image_path: str | None = Field(default=None, max_length=1024)
+    sort_order: int = 0
 
 
 class CourseCreate(BaseModel):
@@ -21,6 +29,16 @@ class CourseCreate(BaseModel):
 
 
 class CourseBlockPublic(BaseModel):
+    id: int
+    heading: str | None
+    text: str
+    image_path: str | None
+    image_url: str | None
+    sort_order: int
+    subblocks: list["CourseSubBlockPublic"]
+
+
+class CourseSubBlockPublic(BaseModel):
     id: int
     heading: str | None
     text: str
@@ -46,3 +64,7 @@ class CoursePublic(BaseModel):
     is_active: bool
     created_at: datetime
     blocks: list[CourseBlockPublic]
+
+
+CourseBlockCreate.model_rebuild()
+CourseBlockPublic.model_rebuild()

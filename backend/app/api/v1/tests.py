@@ -16,9 +16,11 @@ from app.models.user import JobTitleCatalog, RestaurantCatalog, Role, User
 from app.schemas.quiz import (
     QuizAnalyticsResponse,
     QuizAnalyticsSummary,
+    QuizAttemptDetailPublic,
     QuizOptionTakePublic,
     QuizOptionPublic,
     QuizQuestionAnalyticsItem,
+    QuizAttemptQuestionDetailPublic,
     QuizQuestionResultPublic,
     QuizQuestionTakePublic,
     QuizQuestionPublic,
@@ -333,6 +335,54 @@ def _build_attempt_public(db: Session, attempt: QuizAttempt) -> QuizAttemptPubli
         total_questions=attempt.total_questions,
         correct_answers=attempt.correct_answers,
         incorrect_answers=attempt.incorrect_answers,
+    )
+
+
+def _split_saved_options(value: str) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(" | ") if item.strip()]
+
+
+@router.get("/my-attempts", response_model=list[QuizAttemptPublic])
+def list_my_attempts(
+    current_user: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN, Role.LEARNER)),
+    db: Session = Depends(get_db),
+):
+    attempts = list(
+        db.scalars(
+            select(QuizAttempt).where(QuizAttempt.user_id == current_user.id).order_by(QuizAttempt.finished_at.desc())
+        ).all()
+    )
+    return [_build_attempt_public(db, attempt) for attempt in attempts]
+
+
+@router.get("/my-attempts/{attempt_id}", response_model=QuizAttemptDetailPublic)
+def get_my_attempt_detail(
+    attempt_id: int,
+    current_user: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN, Role.LEARNER)),
+    db: Session = Depends(get_db),
+):
+    attempt = db.get(QuizAttempt, attempt_id)
+    if not attempt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Попытка не найдена")
+    if attempt.user_id != current_user.id and current_user.role == Role.LEARNER:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет доступа к этой попытке")
+    answers = list(
+        db.scalars(select(QuizAttemptAnswer).where(QuizAttemptAnswer.attempt_id == attempt_id).order_by(QuizAttemptAnswer.id.asc())).all()
+    )
+    return QuizAttemptDetailPublic(
+        attempt=_build_attempt_public(db, attempt),
+        results=[
+            QuizAttemptQuestionDetailPublic(
+                question_id=answer.question_id,
+                question_text=answer.question_text,
+                selected_options=_split_saved_options(answer.selected_options_text),
+                correct_options=_split_saved_options(answer.correct_options_text),
+                is_correct=answer.is_correct,
+            )
+            for answer in answers
+        ],
     )
 
 

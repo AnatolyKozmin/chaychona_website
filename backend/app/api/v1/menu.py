@@ -7,9 +7,11 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.db.session import get_db
-from app.models.menu import MenuCategory, MenuDish
+from app.models.menu import MenuBranch, MenuCategory, MenuDish
 from app.models.user import RestaurantCatalog, Role, User
 from app.schemas.menu import (
+    MenuBranchCreate,
+    MenuBranchPublic,
     MenuCategoryAdminPublic,
     MenuCategoryCreate,
     MenuCategoryPublic,
@@ -39,8 +41,52 @@ def _normalize_upload_relpath(path: str | None) -> str | None:
     return normalized or None
 
 
+def _normalize_branch_name(name: str) -> str:
+    return " ".join(name.strip().split())
+
+
+def _normalize_category_name(name: str) -> str:
+    return " ".join(name.strip().split())
+
+
+def _parse_restaurant_uuid(restaurant_id: str | None) -> uuid.UUID | None:
+    if not restaurant_id:
+        return None
+    try:
+        return uuid.UUID(restaurant_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный restaurant_id") from exc
+
+
+def _build_category_public(category: MenuCategory, branch_name: str | None = None) -> MenuCategoryPublic:
+    return MenuCategoryPublic(
+        id=category.id,
+        name=category.name,
+        restaurant_id=str(category.restaurant_id) if category.restaurant_id else None,
+        branch_id=category.branch_id,
+        menu_type=branch_name or category.menu_type,
+    )
+
+
+def _build_category_admin_public(category: MenuCategory, branch_name: str | None = None) -> MenuCategoryAdminPublic:
+    return MenuCategoryAdminPublic(
+        id=category.id,
+        name=category.name,
+        restaurant_id=str(category.restaurant_id) if category.restaurant_id else None,
+        branch_id=category.branch_id,
+        menu_type=branch_name or category.menu_type,
+        description=category.description,
+        is_active=category.is_active,
+    )
+
+
 def _build_dish_admin_public(db: Session, dish: MenuDish) -> MenuDishAdminPublic:
     category = db.get(MenuCategory, dish.category_id) if dish.category_id else None
+    branch_name = None
+    if category and category.branch_id:
+        branch = db.get(MenuBranch, category.branch_id)
+        if branch:
+            branch_name = branch.name
     return MenuDishAdminPublic(
         id=dish.id,
         name=dish.name,
@@ -50,7 +96,7 @@ def _build_dish_admin_public(db: Session, dish: MenuDish) -> MenuDishAdminPublic
         price_rubles=dish.price_rubles,
         restaurant_id=str(dish.restaurant_id) if dish.restaurant_id else None,
         category_id=dish.category_id,
-        category=MenuCategoryPublic(id=category.id, name=category.name, menu_type=category.menu_type) if category else None,
+        category=_build_category_public(category, branch_name=branch_name) if category else None,
         is_available=dish.is_available,
         is_active=dish.is_active,
         photo_dish_path=dish.photo_dish_path,
@@ -69,7 +115,18 @@ def get_menu_categories(db: Session = Depends(get_db)):
             .order_by(MenuCategory.name.asc())
         ).all()
     )
-    return [MenuCategoryPublic(id=cat.id, name=cat.name, menu_type=cat.menu_type) for cat in categories]
+    branch_ids = {cat.branch_id for cat in categories if cat.branch_id is not None}
+    branches_by_id: dict[int, MenuBranch] = {}
+    if branch_ids:
+        branches = list(db.scalars(select(MenuBranch).where(MenuBranch.id.in_(branch_ids))).all())
+        branches_by_id = {branch.id: branch for branch in branches}
+    return [
+        _build_category_public(
+            cat,
+            branch_name=branches_by_id.get(cat.branch_id).name if cat.branch_id and branches_by_id.get(cat.branch_id) else None,
+        )
+        for cat in categories
+    ]
 
 
 @router.get("/feed", response_model=MenuFeedResponse)
@@ -94,11 +151,16 @@ def get_menu_feed(
     dishes = list(db.scalars(dish_query.offset(offset).limit(limit)).all())
 
     categories_by_id: dict[int, MenuCategory] = {}
+    branches_by_id: dict[int, MenuBranch] = {}
     if dishes:
         category_ids = {dish.category_id for dish in dishes if dish.category_id is not None}
         if category_ids:
             categories = list(db.scalars(select(MenuCategory).where(MenuCategory.id.in_(category_ids))).all())
             categories_by_id = {cat.id: cat for cat in categories}
+            branch_ids = {cat.branch_id for cat in categories if cat.branch_id is not None}
+            if branch_ids:
+                branches = list(db.scalars(select(MenuBranch).where(MenuBranch.id.in_(branch_ids))).all())
+                branches_by_id = {branch.id: branch for branch in branches}
 
     items: list[MenuDishCard] = []
     for dish in dishes:
@@ -112,11 +174,12 @@ def get_menu_feed(
                 description=dish.description,
                 price=dish.price,
                 price_rubles=dish.price_rubles,
-                category=(
-                    MenuCategoryPublic(id=cat.id, name=cat.name, menu_type=cat.menu_type)
-                    if cat
-                    else None
-                ),
+                category=_build_category_public(
+                    cat,
+                    branch_name=branches_by_id.get(cat.branch_id).name if cat and cat.branch_id and branches_by_id.get(cat.branch_id) else None,
+                )
+                if cat
+                else None,
                 image_url=_to_media_url(image_path),
                 video_url=_to_media_url(dish.video_path),
                 audio_url=_to_media_url(dish.audio_path),
@@ -126,19 +189,85 @@ def get_menu_feed(
     return MenuFeedResponse(total=total, items=items)
 
 
+@router.get("/admin/branches", response_model=list[MenuBranchPublic])
+def list_branches_admin(
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    branches = list(db.scalars(select(MenuBranch).order_by(MenuBranch.sort_order.asc(), MenuBranch.name.asc())).all())
+    return [MenuBranchPublic(id=b.id, name=b.name, is_active=b.is_active, sort_order=b.sort_order) for b in branches]
+
+
+@router.post("/admin/branches", response_model=MenuBranchPublic, status_code=status.HTTP_201_CREATED)
+def create_branch_admin(
+    payload: MenuBranchCreate,
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    name = _normalize_branch_name(payload.name)
+    existing = db.scalar(select(MenuBranch).where(func.lower(MenuBranch.name) == name.lower()))
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ветка уже существует")
+    branch = MenuBranch(name=name, is_active=payload.is_active, sort_order=payload.sort_order)
+    db.add(branch)
+    db.commit()
+    db.refresh(branch)
+    return MenuBranchPublic(id=branch.id, name=branch.name, is_active=branch.is_active, sort_order=branch.sort_order)
+
+
+@router.put("/admin/branches/{branch_id}", response_model=MenuBranchPublic)
+def update_branch_admin(
+    branch_id: int,
+    payload: MenuBranchCreate,
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    branch = db.get(MenuBranch, branch_id)
+    if not branch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ветка не найдена")
+    name = _normalize_branch_name(payload.name)
+    duplicate = db.scalar(select(MenuBranch).where(func.lower(MenuBranch.name) == name.lower(), MenuBranch.id != branch_id))
+    if duplicate:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ветка с таким именем уже существует")
+    branch.name = name
+    branch.is_active = payload.is_active
+    branch.sort_order = payload.sort_order
+    db.commit()
+    db.refresh(branch)
+    return MenuBranchPublic(id=branch.id, name=branch.name, is_active=branch.is_active, sort_order=branch.sort_order)
+
+
+@router.delete("/admin/branches/{branch_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_branch_admin(
+    branch_id: int,
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    branch = db.get(MenuBranch, branch_id)
+    if not branch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ветка не найдена")
+    categories = list(db.scalars(select(MenuCategory).where(MenuCategory.branch_id == branch_id)).all())
+    for category in categories:
+        category.branch_id = None
+    db.delete(branch)
+    db.commit()
+
+
 @router.get("/admin/categories", response_model=list[MenuCategoryAdminPublic])
 def list_categories_admin(
     _: User = Depends(require_roles(Role.SUPERADMIN)),
     db: Session = Depends(get_db),
 ):
     categories = list(db.scalars(select(MenuCategory).order_by(MenuCategory.name.asc())).all())
+    branch_ids = {cat.branch_id for cat in categories if cat.branch_id is not None}
+    branches_by_id: dict[int, MenuBranch] = {}
+    if branch_ids:
+        branches = list(db.scalars(select(MenuBranch).where(MenuBranch.id.in_(branch_ids))).all())
+        branches_by_id = {branch.id: branch for branch in branches}
     return [
-        MenuCategoryAdminPublic(
-            id=cat.id,
-            name=cat.name,
-            menu_type=cat.menu_type,
-            description=cat.description,
-            is_active=cat.is_active,
+        _build_category_admin_public(
+            cat,
+            branch_name=branches_by_id.get(cat.branch_id).name if cat.branch_id and branches_by_id.get(cat.branch_id) else None,
         )
         for cat in categories
     ]
@@ -150,26 +279,33 @@ def create_category_admin(
     _: User = Depends(require_roles(Role.SUPERADMIN)),
     db: Session = Depends(get_db),
 ):
-    name = payload.name.strip()
-    existing = db.scalar(select(MenuCategory).where(func.lower(MenuCategory.name) == name.lower()))
+    name = _normalize_category_name(payload.name)
+    restaurant_uuid = _parse_restaurant_uuid(payload.restaurant_id)
+    if restaurant_uuid and not db.get(RestaurantCatalog, restaurant_uuid):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ресторан не найден")
+    branch = db.get(MenuBranch, payload.branch_id) if payload.branch_id else None
+    if payload.branch_id and not branch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ветка не найдена")
+    existing_query = select(MenuCategory).where(func.lower(MenuCategory.name) == name.lower())
+    if restaurant_uuid:
+        existing_query = existing_query.where(MenuCategory.restaurant_id == restaurant_uuid)
+    else:
+        existing_query = existing_query.where(MenuCategory.restaurant_id.is_(None))
+    existing = db.scalar(existing_query)
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Категория уже существует")
     category = MenuCategory(
         name=name,
-        menu_type=payload.menu_type.strip() if payload.menu_type else None,
+        restaurant_id=restaurant_uuid,
+        branch_id=payload.branch_id,
+        menu_type=branch.name if branch else (payload.menu_type.strip() if payload.menu_type else None),
         description=payload.description.strip() if payload.description else None,
         is_active=payload.is_active,
     )
     db.add(category)
     db.commit()
     db.refresh(category)
-    return MenuCategoryAdminPublic(
-        id=category.id,
-        name=category.name,
-        menu_type=category.menu_type,
-        description=category.description,
-        is_active=category.is_active,
-    )
+    return _build_category_admin_public(category, branch_name=branch.name if branch else None)
 
 
 @router.put("/admin/categories/{category_id}", response_model=MenuCategoryAdminPublic)
@@ -182,25 +318,30 @@ def update_category_admin(
     category = db.get(MenuCategory, category_id)
     if not category:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Категория не найдена")
-    name = payload.name.strip()
-    duplicate = db.scalar(
-        select(MenuCategory).where(func.lower(MenuCategory.name) == name.lower(), MenuCategory.id != category_id)
-    )
+    name = _normalize_category_name(payload.name)
+    restaurant_uuid = _parse_restaurant_uuid(payload.restaurant_id)
+    if restaurant_uuid and not db.get(RestaurantCatalog, restaurant_uuid):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ресторан не найден")
+    branch = db.get(MenuBranch, payload.branch_id) if payload.branch_id else None
+    if payload.branch_id and not branch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ветка не найдена")
+    duplicate_query = select(MenuCategory).where(func.lower(MenuCategory.name) == name.lower(), MenuCategory.id != category_id)
+    if restaurant_uuid:
+        duplicate_query = duplicate_query.where(MenuCategory.restaurant_id == restaurant_uuid)
+    else:
+        duplicate_query = duplicate_query.where(MenuCategory.restaurant_id.is_(None))
+    duplicate = db.scalar(duplicate_query)
     if duplicate:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Категория с таким именем уже существует")
     category.name = name
-    category.menu_type = payload.menu_type.strip() if payload.menu_type else None
+    category.restaurant_id = restaurant_uuid
+    category.branch_id = payload.branch_id
+    category.menu_type = branch.name if branch else (payload.menu_type.strip() if payload.menu_type else None)
     category.description = payload.description.strip() if payload.description else None
     category.is_active = payload.is_active
     db.commit()
     db.refresh(category)
-    return MenuCategoryAdminPublic(
-        id=category.id,
-        name=category.name,
-        menu_type=category.menu_type,
-        description=category.description,
-        is_active=category.is_active,
-    )
+    return _build_category_admin_public(category, branch_name=branch.name if branch else None)
 
 
 @router.delete("/admin/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -248,15 +389,16 @@ def create_dish_admin(
     if payload.category_id and not category:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Категория не найдена")
 
-    restaurant_uuid = None
-    if payload.restaurant_id:
-        try:
-            restaurant_uuid = uuid.UUID(payload.restaurant_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный restaurant_id") from exc
-        restaurant = db.get(RestaurantCatalog, restaurant_uuid)
-        if not restaurant:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ресторан не найден")
+    restaurant_uuid = _parse_restaurant_uuid(payload.restaurant_id)
+    if restaurant_uuid and not db.get(RestaurantCatalog, restaurant_uuid):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ресторан не найден")
+    if category and category.restaurant_id and restaurant_uuid and category.restaurant_id != restaurant_uuid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Категория относится к другому ресторану",
+        )
+    if category and category.restaurant_id and not restaurant_uuid:
+        restaurant_uuid = category.restaurant_id
 
     dish = MenuDish(
         name=payload.name.strip(),
@@ -293,15 +435,16 @@ def update_dish_admin(
     if payload.category_id and not category:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Категория не найдена")
 
-    restaurant_uuid = None
-    if payload.restaurant_id:
-        try:
-            restaurant_uuid = uuid.UUID(payload.restaurant_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный restaurant_id") from exc
-        restaurant = db.get(RestaurantCatalog, restaurant_uuid)
-        if not restaurant:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ресторан не найден")
+    restaurant_uuid = _parse_restaurant_uuid(payload.restaurant_id)
+    if restaurant_uuid and not db.get(RestaurantCatalog, restaurant_uuid):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ресторан не найден")
+    if category and category.restaurant_id and restaurant_uuid and category.restaurant_id != restaurant_uuid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Категория относится к другому ресторану",
+        )
+    if category and category.restaurant_id and not restaurant_uuid:
+        restaurant_uuid = category.restaurant_id
 
     dish.name = payload.name.strip()
     dish.ingredients = payload.ingredients.strip() if payload.ingredients else None

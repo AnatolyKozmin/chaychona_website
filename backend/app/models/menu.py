@@ -8,12 +8,29 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
 
+class MenuBranch(Base):
+    __tablename__ = "menu_branches"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
 class MenuCategory(Base):
     __tablename__ = "menu_categories"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     source_category_id: Mapped[int | None] = mapped_column(Integer, unique=True, nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    restaurant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("restaurant_catalog.id"), nullable=True, index=True
+    )
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("menu_branches.id"), nullable=True, index=True)
     menu_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

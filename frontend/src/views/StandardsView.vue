@@ -11,6 +11,16 @@ interface CourseBlock {
   image_path: string | null;
   image_url: string | null;
   sort_order: number;
+  subblocks: CourseSubBlock[];
+}
+
+interface CourseSubBlock {
+  id: number;
+  heading: string | null;
+  text: string;
+  image_path: string | null;
+  image_url: string | null;
+  sort_order: number;
 }
 
 interface Course {
@@ -67,7 +77,7 @@ const form = reactive({
   job_title_id: "",
   linked_test_id: "",
   is_active: true,
-  blocks: [{ heading: "", text: "", image_path: "", sort_order: 0 }]
+  blocks: [{ heading: "", text: "", image_path: "", sort_order: 0, subblocks: [] as Array<{ heading: string; text: string; image_path: string; sort_order: number }> }]
 });
 
 const availableRoles = computed(
@@ -142,11 +152,11 @@ function resetForm() {
   form.job_title_id = restaurants.value[0]?.roles[0]?.id ?? "";
   form.linked_test_id = "";
   form.is_active = true;
-  form.blocks = [{ heading: "", text: "", image_path: "", sort_order: 0 }];
+  form.blocks = [{ heading: "", text: "", image_path: "", sort_order: 0, subblocks: [] }];
 }
 
 function addBlock() {
-  form.blocks.push({ heading: "", text: "", image_path: "", sort_order: form.blocks.length });
+  form.blocks.push({ heading: "", text: "", image_path: "", sort_order: form.blocks.length, subblocks: [] });
 }
 
 function removeBlock(index: number) {
@@ -173,6 +183,38 @@ async function uploadBlockImage(index: number, event: Event) {
   }
 }
 
+function addSubBlock(blockIndex: number) {
+  form.blocks[blockIndex].subblocks.push({
+    heading: "",
+    text: "",
+    image_path: "",
+    sort_order: form.blocks[blockIndex].subblocks.length
+  });
+}
+
+function removeSubBlock(blockIndex: number, subIndex: number) {
+  form.blocks[blockIndex].subblocks.splice(subIndex, 1);
+}
+
+async function uploadSubBlockImage(blockIndex: number, subIndex: number, event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+  saving.value = true;
+  error.value = "";
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    const { data } = await api.post<{ path: string }>("/menu/admin/media", fd);
+    form.blocks[blockIndex].subblocks[subIndex].image_path = data.path;
+  } catch (e: any) {
+    error.value = extractError(e, "Не удалось загрузить картинку подблока");
+  } finally {
+    saving.value = false;
+    target.value = "";
+  }
+}
+
 function editCourse(course: Course) {
   adminEditingId.value = course.id;
   form.title = course.title;
@@ -185,7 +227,13 @@ function editCourse(course: Course) {
     heading: block.heading || "",
     text: block.text,
     image_path: block.image_path || "",
-    sort_order: block.sort_order
+    sort_order: block.sort_order,
+    subblocks: block.subblocks.map((sub) => ({
+      heading: sub.heading || "",
+      text: sub.text,
+      image_path: sub.image_path || "",
+      sort_order: sub.sort_order
+    }))
   }));
 }
 
@@ -205,7 +253,13 @@ async function saveCourse() {
         heading: block.heading || null,
         text: block.text,
         image_path: block.image_path || null,
-        sort_order: idx
+        sort_order: idx,
+        subblocks: block.subblocks.map((sub, subIdx) => ({
+          heading: sub.heading || null,
+          text: sub.text,
+          image_path: sub.image_path || null,
+          sort_order: subIdx
+        }))
       }))
     };
     if (adminEditingId.value) {
@@ -351,7 +405,22 @@ watch(
             alt="block image"
             style="width: 100%; border-radius: 12px; margin-bottom: 10px"
           />
-          <p style="white-space: pre-wrap">{{ activeBlock.text }}</p>
+          <p class="long-text">{{ activeBlock.text }}</p>
+          <div
+            v-for="subblock in activeBlock.subblocks"
+            :key="subblock.id"
+            class="clean-item"
+            style="margin-top: 10px"
+          >
+            <h4 v-if="subblock.heading" style="margin-top: 0">{{ subblock.heading }}</h4>
+            <img
+              v-if="subblock.image_path"
+              :src="toMediaUrl(subblock.image_path) || undefined"
+              alt="subblock image"
+              style="width: 100%; border-radius: 10px; margin-bottom: 8px"
+            />
+            <p class="long-text" style="margin-bottom: 0">{{ subblock.text }}</p>
+          </div>
           <div class="actions-row" style="margin-top: 10px">
             <button type="button" class="ghost" :disabled="activeBlockIdx === 0" @click="prevBlock">Назад</button>
             <button
@@ -425,6 +494,37 @@ watch(
           <div class="actions-row">
             <input v-model="block.image_path" placeholder="uploads/..." />
             <input type="file" accept="image/*" @change="uploadBlockImage(index, $event)" />
+          </div>
+          <div class="card" style="margin-top: 10px">
+            <div class="actions-row">
+              <strong>Подблоки</strong>
+              <button type="button" class="ghost" @click="addSubBlock(index)">Добавить подблок</button>
+            </div>
+            <div
+              v-for="(subblock, subIndex) in block.subblocks"
+              :key="subIndex"
+              class="clean-item"
+              style="margin-top: 8px"
+            >
+              <div class="actions-row">
+                <span>Подблок {{ subIndex + 1 }}</span>
+                <button type="button" class="ghost" @click="removeSubBlock(index, subIndex)">Удалить</button>
+              </div>
+              <label>Заголовок подблока</label>
+              <input v-model="subblock.heading" />
+              <label>Текст подблока</label>
+              <textarea
+                v-model="subblock.text"
+                rows="4"
+                required
+                style="width: 100%; border: 1px solid #d0d8e5; border-radius: 10px; padding: 10px 12px;"
+              />
+              <label>Картинка подблока (опционально)</label>
+              <div class="actions-row">
+                <input v-model="subblock.image_path" placeholder="uploads/..." />
+                <input type="file" accept="image/*" @change="uploadSubBlockImage(index, subIndex, $event)" />
+              </div>
+            </div>
           </div>
         </div>
       </div>

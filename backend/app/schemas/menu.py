@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field
 class MenuCategoryPublic(BaseModel):
     id: int
     name: str
+    restaurant_id: str | None = None
+    branch_id: int | None = None
     menu_type: str | None
 
 
@@ -14,9 +16,24 @@ class MenuCategoryAdminPublic(MenuCategoryPublic):
 
 class MenuCategoryCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
+    restaurant_id: str | None = None
+    branch_id: int | None = None
     menu_type: str | None = Field(default=None, max_length=32)
     description: str | None = Field(default=None, max_length=5000)
     is_active: bool = True
+
+
+class MenuBranchPublic(BaseModel):
+    id: int
+    name: str
+    is_active: bool
+    sort_order: int
+
+
+class MenuBranchCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    is_active: bool = True
+    sort_order: int = Field(default=0, ge=0, le=10000)
 
 
 class MenuDishCard(BaseModel):

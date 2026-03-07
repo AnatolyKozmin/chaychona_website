@@ -125,6 +125,19 @@ class QuizAttemptPublic(BaseModel):
     incorrect_answers: int
 
 
+class QuizAttemptQuestionDetailPublic(BaseModel):
+    question_id: int
+    question_text: str
+    selected_options: list[str]
+    correct_options: list[str]
+    is_correct: bool
+
+
+class QuizAttemptDetailPublic(BaseModel):
+    attempt: QuizAttemptPublic
+    results: list[QuizAttemptQuestionDetailPublic]
+
+
 class QuizQuestionAnalyticsItem(BaseModel):
     question_id: int
     test_id: int

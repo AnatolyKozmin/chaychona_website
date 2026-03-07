@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 
@@ -57,10 +57,27 @@ interface AnalyticsResponse {
   user_analytics: UserAnalyticsItem[];
 }
 
+interface AttemptDetail {
+  attempt: AttemptItem;
+  results: Array<{
+    question_id: number;
+    question_text: string;
+    selected_options: string[];
+    correct_options: string[];
+    is_correct: boolean;
+  }>;
+}
+
 const auth = useAuthStore();
 const loading = ref(false);
 const error = ref("");
 const analytics = ref<AnalyticsResponse | null>(null);
+const detailLoading = ref(false);
+const detailOpen = ref(false);
+const selectedAttempt = ref<AttemptDetail | null>(null);
+const filterRestaurant = ref("");
+const filterRole = ref("");
+const filterUser = ref("");
 
 function formatDate(value: string | null): string {
   if (!value) {
@@ -77,6 +94,28 @@ function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+const availableRestaurants = computed(() => {
+  const source = analytics.value?.attempts ?? [];
+  return [...new Set(source.map((item) => item.user_restaurant || "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
+});
+
+const availableRoles = computed(() => {
+  const source = analytics.value?.attempts ?? [];
+  return [...new Set(source.map((item) => item.user_job_title || "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
+});
+
+const filteredAttempts = computed(() => {
+  const source = analytics.value?.attempts ?? [];
+  const nameQuery = filterUser.value.trim().toLowerCase();
+  return source.filter((item) => {
+    const matchesRestaurant = !filterRestaurant.value || (item.user_restaurant || "") === filterRestaurant.value;
+    const matchesRole = !filterRole.value || (item.user_job_title || "") === filterRole.value;
+    const haystack = `${item.user_name} ${item.user_email}`.toLowerCase();
+    const matchesUser = !nameQuery || haystack.includes(nameQuery);
+    return matchesRestaurant && matchesRole && matchesUser;
+  });
+});
+
 async function loadAnalytics() {
   loading.value = true;
   error.value = "";
@@ -88,11 +127,34 @@ async function loadAnalytics() {
       }
     });
     analytics.value = data;
+    filterRestaurant.value = "";
+    filterRole.value = "";
+    filterUser.value = "";
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "Не удалось загрузить аналитику";
   } finally {
     loading.value = false;
   }
+}
+
+async function openAttemptDetail(attemptId: number) {
+  detailLoading.value = true;
+  detailOpen.value = true;
+  selectedAttempt.value = null;
+  try {
+    const { data } = await api.get<AttemptDetail>(`/tests/my-attempts/${attemptId}`);
+    selectedAttempt.value = data;
+  } catch (e: any) {
+    error.value = e?.response?.data?.detail ?? "Не удалось загрузить детали прохождения";
+    detailOpen.value = false;
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+function closeAttemptDetail() {
+  detailOpen.value = false;
+  selectedAttempt.value = null;
 }
 
 onMounted(async () => {
@@ -136,6 +198,7 @@ onMounted(async () => {
                 <th>Тест</th>
                 <th>Результат</th>
                 <th>Время</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -145,41 +208,9 @@ onMounted(async () => {
                 <td>{{ attempt.test_title }}</td>
                 <td>{{ attempt.correct_answers }}/{{ attempt.total_questions }}</td>
                 <td>{{ attempt.duration_seconds ?? "-" }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>Все прохождения</h3>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Пользователь</th>
-                <th>Ресторан / роль</th>
-                <th>Тест</th>
-                <th>Результат</th>
-                <th>Время</th>
-                <th>Начало</th>
-                <th>Окончание</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="attempt in analytics.attempts" :key="attempt.id">
-                <td>{{ attempt.id }}</td>
                 <td>
-                  <div>{{ attempt.user_name }}</div>
-                  <div class="muted" style="font-size: 12px">{{ attempt.user_email }}</div>
+                  <button type="button" class="ghost" @click="openAttemptDetail(attempt.id)">Открыть</button>
                 </td>
-                <td>{{ attempt.user_restaurant || "-" }} / {{ attempt.user_job_title || "-" }}</td>
-                <td>{{ attempt.test_title }}</td>
-                <td>{{ attempt.correct_answers }}/{{ attempt.total_questions }}</td>
-                <td>{{ attempt.duration_seconds ?? "-" }}</td>
-                <td>{{ formatDate(attempt.started_at) }}</td>
-                <td>{{ formatDate(attempt.finished_at) }}</td>
               </tr>
             </tbody>
           </table>
@@ -242,6 +273,68 @@ onMounted(async () => {
           </table>
         </div>
       </div>
+
+      <div class="card">
+        <h3>Все прохождения</h3>
+        <div class="analytics-filters">
+          <div>
+            <label>Ресторан</label>
+            <select v-model="filterRestaurant">
+              <option value="">Все рестораны</option>
+              <option v-for="item in availableRestaurants" :key="item" :value="item">{{ item }}</option>
+            </select>
+          </div>
+          <div>
+            <label>Роль</label>
+            <select v-model="filterRole">
+              <option value="">Все роли</option>
+              <option v-for="item in availableRoles" :key="item" :value="item">{{ item }}</option>
+            </select>
+          </div>
+          <div>
+            <label>Имя или email</label>
+            <input v-model="filterUser" placeholder="Введите имя или email" />
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Пользователь</th>
+                <th>Ресторан / роль</th>
+                <th>Тест</th>
+                <th>Результат</th>
+                <th>Время</th>
+                <th>Начало</th>
+                <th>Окончание</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="attempt in filteredAttempts" :key="attempt.id">
+                <td>{{ attempt.id }}</td>
+                <td>
+                  <div>{{ attempt.user_name }}</div>
+                  <div class="muted" style="font-size: 12px">{{ attempt.user_email }}</div>
+                </td>
+                <td>{{ attempt.user_restaurant || "-" }} / {{ attempt.user_job_title || "-" }}</td>
+                <td>{{ attempt.test_title }}</td>
+                <td>{{ attempt.correct_answers }}/{{ attempt.total_questions }}</td>
+                <td>{{ attempt.duration_seconds ?? "-" }}</td>
+                <td>{{ formatDate(attempt.started_at) }}</td>
+                <td>{{ formatDate(attempt.finished_at) }}</td>
+                <td>
+                  <button type="button" class="ghost" @click="openAttemptDetail(attempt.id)">Открыть</button>
+                </td>
+              </tr>
+              <tr v-if="filteredAttempts.length === 0">
+                <td colspan="9" class="muted">По выбранным фильтрам нет данных.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </template>
   </section>
 
@@ -249,4 +342,50 @@ onMounted(async () => {
     <h2>Аналитика тестов</h2>
     <p class="error">Доступ только для суперадмина.</p>
   </section>
+
+  <div v-if="detailOpen" class="modal-backdrop" @click.self="closeAttemptDetail">
+    <div class="card modal-card">
+      <div class="actions-row">
+        <h3 style="margin: 0">Детали прохождения</h3>
+        <button type="button" class="ghost" @click="closeAttemptDetail">Закрыть</button>
+      </div>
+      <p v-if="detailLoading">Загрузка...</p>
+      <template v-else-if="selectedAttempt">
+        <div class="attempt-header-grid">
+          <div class="clean-item">
+            <p class="muted">Пользователь</p>
+            <p><strong>{{ selectedAttempt.attempt.user_name }}</strong></p>
+            <p class="muted" style="font-size: 12px">{{ selectedAttempt.attempt.user_email }}</p>
+          </div>
+          <div class="clean-item">
+            <p class="muted">Тест</p>
+            <p><strong>{{ selectedAttempt.attempt.test_title }}</strong></p>
+          </div>
+          <div class="clean-item">
+            <p class="muted">Результат</p>
+            <p><strong>{{ selectedAttempt.attempt.correct_answers }}/{{ selectedAttempt.attempt.total_questions }}</strong></p>
+          </div>
+          <div class="clean-item">
+            <p class="muted">Время</p>
+            <p><strong>{{ selectedAttempt.attempt.duration_seconds ?? "-" }} сек.</strong></p>
+            <p class="muted" style="font-size: 12px">{{ formatDate(selectedAttempt.attempt.finished_at) }}</p>
+          </div>
+        </div>
+
+        <div class="attempt-result-list">
+          <div class="clean-item" v-for="item in selectedAttempt.results" :key="item.question_id">
+            <div class="actions-row">
+              <p style="margin: 0"><strong>{{ item.question_text }}</strong></p>
+              <span class="result-pill" :class="item.is_correct ? 'result-pill-success' : 'result-pill-error'">
+                {{ item.is_correct ? "Верно" : "Неверно" }}
+              </span>
+            </div>
+            <hr class="result-divider" />
+            <p><strong>Ваш ответ:</strong> {{ item.selected_options.join(", ") || "Не выбран" }}</p>
+            <p><strong>Правильный ответ:</strong> {{ item.correct_options.join(", ") || "—" }}</p>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
 </template>

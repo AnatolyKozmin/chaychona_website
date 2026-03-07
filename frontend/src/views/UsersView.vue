@@ -61,6 +61,26 @@ const createForm = reactive({
   job_title: ""
 });
 
+function extractError(e: any, fallback: string): string {
+  const detail = e?.response?.data?.detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === "string") {
+          return item;
+        }
+        const loc = Array.isArray(item?.loc) ? item.loc.join(".") : "";
+        const msg = item?.msg || JSON.stringify(item);
+        return loc ? `${loc}: ${msg}` : msg;
+      })
+      .join(" | ");
+  }
+  if (typeof detail === "string" && detail.trim()) {
+    return detail;
+  }
+  return fallback;
+}
+
 function getRolesForRestaurant(restaurantName: string): CatalogItem[] {
   const selected = restaurantsWithRoles.value.find((item) => item.name === restaurantName);
   return selected?.roles ?? [];
@@ -144,19 +164,44 @@ async function saveLearnerProfile(user: UserRecord) {
 }
 
 async function createUser() {
-  await api.post("/users", {
-    ...createForm,
-    restaurant: createForm.restaurant || null,
-    job_title: createForm.role === "learner" ? createForm.job_title || null : null
-  });
-  createForm.first_name = "";
-  createForm.last_name = "";
-  createForm.restaurant = "";
-  createForm.login = "";
-  createForm.password = "";
-  createForm.role = "learner";
-  createForm.job_title = "";
-  await loadUsers();
+  error.value = "";
+  if (createForm.first_name.trim().length < 2) {
+    error.value = "Имя должно содержать минимум 2 символа";
+    return;
+  }
+  if (createForm.last_name.trim().length < 2) {
+    error.value = "Фамилия должна содержать минимум 2 символа";
+    return;
+  }
+  if (createForm.login.trim().length < 3) {
+    error.value = "Логин должен содержать минимум 3 символа";
+    return;
+  }
+  if (createForm.password.length < 8) {
+    error.value = "Пароль должен содержать минимум 8 символов";
+    return;
+  }
+  if (createForm.role === "learner" && (!createForm.restaurant || !createForm.job_title)) {
+    error.value = "Для обучающегося выберите ресторан и должность";
+    return;
+  }
+  try {
+    await api.post("/users", {
+      ...createForm,
+      restaurant: createForm.restaurant || null,
+      job_title: createForm.role === "learner" ? createForm.job_title || null : null
+    });
+    createForm.first_name = "";
+    createForm.last_name = "";
+    createForm.restaurant = "";
+    createForm.login = "";
+    createForm.password = "";
+    createForm.role = "learner";
+    createForm.job_title = "";
+    await loadUsers();
+  } catch (e: any) {
+    error.value = extractError(e, "Не удалось создать пользователя");
+  }
 }
 
 async function addRestaurant() {

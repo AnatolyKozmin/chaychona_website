@@ -16,7 +16,7 @@ from app.core.config import get_settings
 from app.core.security import get_password_hash
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
-from app.models.menu import MenuDish
+from app.models.menu import MenuCategory, MenuDish
 from app.models import course as _course_models  # noqa: F401
 from app.models import menu as _menu_models  # noqa: F401
 from app.models import quiz as _quiz_models  # noqa: F401
@@ -86,6 +86,84 @@ def startup_event() -> None:
         connection.execute(text("ALTER TABLE menu_dishes ADD COLUMN IF NOT EXISTS restaurant_id UUID"))
         connection.execute(
             text(
+                "CREATE TABLE IF NOT EXISTS menu_branches ("
+                "id SERIAL PRIMARY KEY, "
+                "name VARCHAR(64) NOT NULL, "
+                "is_active BOOLEAN NOT NULL DEFAULT TRUE, "
+                "sort_order INTEGER NOT NULL DEFAULT 0, "
+                "created_at TIMESTAMP NOT NULL DEFAULT NOW(), "
+                "updated_at TIMESTAMP NOT NULL DEFAULT NOW()"
+                ")"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_menu_branches_name_lower "
+                "ON menu_branches (lower(name))"
+            )
+        )
+        connection.execute(text("ALTER TABLE menu_branches ALTER COLUMN created_at SET DEFAULT NOW()"))
+        connection.execute(text("ALTER TABLE menu_branches ALTER COLUMN updated_at SET DEFAULT NOW()"))
+        connection.execute(text("ALTER TABLE menu_categories ADD COLUMN IF NOT EXISTS restaurant_id UUID"))
+        connection.execute(text("ALTER TABLE menu_categories ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
+        connection.execute(
+            text(
+                "DO $$ "
+                "BEGIN "
+                "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'menu_categories_restaurant_id_fkey') THEN "
+                "ALTER TABLE menu_categories "
+                "ADD CONSTRAINT menu_categories_restaurant_id_fkey "
+                "FOREIGN KEY (restaurant_id) REFERENCES restaurant_catalog (id); "
+                "END IF; "
+                "END $$;"
+            )
+        )
+        connection.execute(
+            text(
+                "DO $$ "
+                "BEGIN "
+                "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'menu_categories_branch_id_fkey') THEN "
+                "ALTER TABLE menu_categories "
+                "ADD CONSTRAINT menu_categories_branch_id_fkey "
+                "FOREIGN KEY (branch_id) REFERENCES menu_branches (id); "
+                "END IF; "
+                "END $$;"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_menu_categories_restaurant_id "
+                "ON menu_categories (restaurant_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_menu_categories_branch_id "
+                "ON menu_categories (branch_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO menu_branches (name, is_active, sort_order, created_at, updated_at) "
+                "SELECT DISTINCT trim(menu_type), TRUE, 0, NOW(), NOW() "
+                "FROM menu_categories "
+                "WHERE menu_type IS NOT NULL AND trim(menu_type) <> '' "
+                "ON CONFLICT DO NOTHING"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE menu_categories c "
+                "SET branch_id = b.id "
+                "FROM menu_branches b "
+                "WHERE c.branch_id IS NULL "
+                "AND c.menu_type IS NOT NULL "
+                "AND trim(c.menu_type) <> '' "
+                "AND lower(trim(c.menu_type)) = lower(b.name)"
+            )
+        )
+        connection.execute(
+            text(
                 "DO $$ "
                 "BEGIN "
                 "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'menu_dishes_restaurant_id_fkey') THEN "
@@ -133,6 +211,11 @@ def startup_event() -> None:
         db.execute(
             update(MenuDish)
             .where(MenuDish.restaurant_id.is_(None))
+            .values(restaurant_id=chaihona.id)
+        )
+        db.execute(
+            update(MenuCategory)
+            .where(MenuCategory.restaurant_id.is_(None))
             .values(restaurant_id=chaihona.id)
         )
         db.commit()
