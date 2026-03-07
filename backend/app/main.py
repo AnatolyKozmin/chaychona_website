@@ -180,6 +180,12 @@ def startup_event() -> None:
                 "ON menu_dishes (restaurant_id)"
             )
         )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_course_block_progress_user_course_block "
+                "ON course_block_progress (user_id, course_id, block_id)"
+            )
+        )
 
     db = SessionLocal()
     try:

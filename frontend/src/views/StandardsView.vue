@@ -37,6 +37,38 @@ interface Course {
   blocks: CourseBlock[];
 }
 
+interface LearnerBlockProgress {
+  block_id: number;
+  title: string;
+  sort_order: number;
+  is_completed: boolean;
+  completed_at: string | null;
+  is_unlocked: boolean;
+}
+
+interface LearnerLinkedTestStats {
+  test_id: number;
+  test_title: string;
+  attempts_count: number;
+  best_score_percent: number | null;
+  last_score_percent: number | null;
+  last_attempt_at: string | null;
+}
+
+interface LearnerCourseOverview {
+  id: number;
+  title: string;
+  description: string | null;
+  restaurant_name: string | null;
+  job_title_name: string | null;
+  total_blocks: number;
+  completed_blocks: number;
+  progress_percent: number;
+  is_completed: boolean;
+  blocks: LearnerBlockProgress[];
+  linked_test_stats: LearnerLinkedTestStats | null;
+}
+
 interface RestaurantWithRoles {
   id: string;
   name: string;
@@ -57,18 +89,12 @@ const saving = ref(false);
 const error = ref("");
 const success = ref("");
 const courses = ref<Course[]>([]);
-const activeCourseIdx = ref(0);
-const activeBlockIdx = ref(0);
+const learnerCourses = ref<LearnerCourseOverview[]>([]);
 const adminEditingId = ref<number | null>(null);
 const restaurants = ref<RestaurantWithRoles[]>([]);
 const tests = ref<TestShort[]>([]);
 
 const adminAllowed = computed(() => auth.isAdmin || auth.isSuperadmin);
-const activeCourse = computed(() => courses.value[activeCourseIdx.value] ?? null);
-const activeBlock = computed(() => activeCourse.value?.blocks[activeBlockIdx.value] ?? null);
-const blockOffsetX = ref(0);
-let dragStartX = 0;
-let dragging = false;
 
 const form = reactive({
   title: "",
@@ -113,11 +139,15 @@ async function loadCourses() {
   loading.value = true;
   error.value = "";
   try {
-    const endpoint = adminAllowed.value ? "/courses/admin" : "/courses/my";
-    const { data } = await api.get<Course[]>(endpoint);
-    courses.value = data;
-    activeCourseIdx.value = 0;
-    activeBlockIdx.value = 0;
+    if (adminAllowed.value) {
+      const { data } = await api.get<Course[]>("/courses/admin");
+      courses.value = data;
+      learnerCourses.value = [];
+      return;
+    }
+    const { data } = await api.get<LearnerCourseOverview[]>("/courses/my-overview");
+    learnerCourses.value = data;
+    courses.value = [];
   } catch (e: any) {
     error.value = extractError(e, "Не удалось загрузить стандарты");
   } finally {
@@ -237,6 +267,10 @@ function editCourse(course: Course) {
   }));
 }
 
+function openCourseStudy(courseId: number) {
+  router.push({ name: "standards-study", params: { id: String(courseId) } });
+}
+
 async function saveCourse() {
   saving.value = true;
   error.value = "";
@@ -295,49 +329,6 @@ async function removeCourse(courseId: number) {
   }
 }
 
-function nextBlock() {
-  if (!activeCourse.value) return;
-  if (activeBlockIdx.value < activeCourse.value.blocks.length - 1) {
-    activeBlockIdx.value += 1;
-  }
-}
-
-function prevBlock() {
-  if (activeBlockIdx.value > 0) {
-    activeBlockIdx.value -= 1;
-  }
-}
-
-function selectCourse(index: number) {
-  activeCourseIdx.value = index;
-  activeBlockIdx.value = 0;
-  blockOffsetX.value = 0;
-}
-
-function openLinkedTest() {
-  if (!activeCourse.value?.linked_test) return;
-  router.push({ name: "my-tests" });
-}
-
-function onBlockPointerDown(event: PointerEvent) {
-  dragging = true;
-  dragStartX = event.clientX;
-}
-
-function onBlockPointerMove(event: PointerEvent) {
-  if (!dragging) return;
-  blockOffsetX.value = event.clientX - dragStartX;
-}
-
-function onBlockPointerUp() {
-  if (!dragging) return;
-  const threshold = 80;
-  if (blockOffsetX.value <= -threshold) nextBlock();
-  if (blockOffsetX.value >= threshold) prevBlock();
-  blockOffsetX.value = 0;
-  dragging = false;
-}
-
 onMounted(async () => {
   await loadCourses();
   await loadAdminRefs();
@@ -365,76 +356,69 @@ watch(
     <p v-if="loading">Загрузка...</p>
 
     <template v-if="!loading">
-      <p v-if="courses.length === 0" class="muted">Стандарты пока не заполнены.</p>
-      <template v-else>
-        <div class="clean-list">
-          <button
-            v-for="(course, idx) in courses"
-            :key="course.id"
-            type="button"
-            class="ghost clean-item"
-            :class="{ selected: idx === activeCourseIdx }"
-            style="text-align: left"
-            @click="selectCourse(idx)"
-          >
-            <div>{{ course.title }}</div>
-            <div class="muted" style="font-size: 12px">
-              {{ course.restaurant_name || "Все рестораны" }} • {{ course.job_title_name || "Все роли" }}
+      <template v-if="adminAllowed">
+        <p v-if="courses.length === 0" class="muted">Стандарты пока не заполнены.</p>
+        <div v-else class="clean-list">
+          <div v-for="course in courses" :key="course.id" class="clean-item">
+            <div class="actions-row">
+              <div>
+                <div><strong>{{ course.title }}</strong></div>
+                <div class="muted" style="font-size: 12px">
+                  {{ course.restaurant_name || "Все рестораны" }} • {{ course.job_title_name || "Все роли" }}
+                </div>
+              </div>
+              <div class="actions-row">
+                <button type="button" class="ghost" @click="editCourse(course)">Редактировать</button>
+                <button type="button" @click="removeCourse(course.id)">Удалить</button>
+              </div>
             </div>
-          </button>
+          </div>
         </div>
-
-        <div
-          v-if="activeCourse && activeBlock"
-          class="tinder-card"
-          style="margin-top: 12px"
-          :style="{ transform: `translateX(${blockOffsetX}px) rotate(${blockOffsetX / 18}deg)` }"
-          @pointerdown="onBlockPointerDown"
-          @pointermove="onBlockPointerMove"
-          @pointerup="onBlockPointerUp"
-          @pointercancel="onBlockPointerUp"
-          @pointerleave="onBlockPointerUp"
-        >
-          <p class="muted" style="margin-top: 0">
-            Блок {{ activeBlockIdx + 1 }} из {{ activeCourse.blocks.length }}
-          </p>
-          <h3 style="margin-top: 0">{{ activeBlock.heading || activeCourse.title }}</h3>
-          <img
-            v-if="activeBlock.image_path"
-            :src="toMediaUrl(activeBlock.image_path) || undefined"
-            alt="block image"
-            style="width: 100%; border-radius: 12px; margin-bottom: 10px"
-          />
-          <p class="long-text">{{ activeBlock.text }}</p>
-          <div
-            v-for="subblock in activeBlock.subblocks"
-            :key="subblock.id"
-            class="clean-item"
-            style="margin-top: 10px"
-          >
-            <h4 v-if="subblock.heading" style="margin-top: 0">{{ subblock.heading }}</h4>
-            <img
-              v-if="subblock.image_path"
-              :src="toMediaUrl(subblock.image_path) || undefined"
-              alt="subblock image"
-              style="width: 100%; border-radius: 10px; margin-bottom: 8px"
-            />
-            <p class="long-text" style="margin-bottom: 0">{{ subblock.text }}</p>
-          </div>
-          <div class="actions-row" style="margin-top: 10px">
-            <button type="button" class="ghost" :disabled="activeBlockIdx === 0" @click="prevBlock">Назад</button>
-            <button
-              type="button"
-              :disabled="activeBlockIdx >= activeCourse.blocks.length - 1"
-              @click="nextBlock"
-            >
-              Вперед
-            </button>
-          </div>
-
-          <div v-if="activeBlockIdx === activeCourse.blocks.length - 1 && activeCourse.linked_test" class="card">
-            <p><strong>Проверка знаний:</strong> {{ activeCourse.linked_test.title }}</p>
-            <button type="button" @click="openLinkedTest">Перейти к тестам</button>
+      </template>
+      <template v-else>
+        <p v-if="learnerCourses.length === 0" class="muted">Для вас пока нет назначенных обучений.</p>
+        <div v-else class="clean-list">
+          <div v-for="course in learnerCourses" :key="course.id" class="clean-item">
+            <div class="actions-row">
+              <div>
+                <strong>{{ course.title }}</strong>
+                <p class="muted" style="margin: 6px 0 0 0">
+                  {{ course.restaurant_name || "Все рестораны" }} • {{ course.job_title_name || "Все роли" }}
+                </p>
+              </div>
+              <span class="result-pill" :class="course.is_completed ? 'result-pill-success' : 'result-pill-error'">
+                {{ course.is_completed ? "Изучено" : "В процессе" }}
+              </span>
+            </div>
+            <p v-if="course.description" class="muted long-text" style="margin-top: 8px">{{ course.description }}</p>
+            <div class="menu-stats-row">
+              <span class="status-chip">Прогресс: {{ course.progress_percent }}%</span>
+              <span class="status-chip">Блоков: {{ course.completed_blocks }}/{{ course.total_blocks }}</span>
+              <span v-if="course.linked_test_stats" class="status-chip status-chip-success">
+                Тест: {{ course.linked_test_stats.best_score_percent ?? 0 }}%
+              </span>
+            </div>
+            <div class="clean-list" style="margin-top: 8px">
+              <div v-for="block in course.blocks" :key="block.block_id" class="clean-item">
+                <div class="actions-row">
+                  <span class="long-text">{{ block.title }}</span>
+                  <span class="result-pill" :class="block.is_completed ? 'result-pill-success' : 'result-pill-error'">
+                    {{ block.is_completed ? "Понял" : "Не изучен" }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="actions-row" style="margin-top: 10px">
+              <button type="button" @click="openCourseStudy(course.id)">Открыть обучение</button>
+              <button
+                v-if="course.linked_test_stats"
+                type="button"
+                class="ghost"
+                @click="router.push({ name: 'my-tests', query: { test: String(course.linked_test_stats.test_id) } })"
+              >
+                Открыть тест
+              </button>
+            </div>
           </div>
         </div>
       </template>

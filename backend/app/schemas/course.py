@@ -66,5 +66,44 @@ class CoursePublic(BaseModel):
     blocks: list[CourseBlockPublic]
 
 
+class CourseLearnerBlockProgressPublic(BaseModel):
+    block_id: int
+    title: str
+    sort_order: int
+    is_completed: bool
+    completed_at: datetime | None
+    is_unlocked: bool
+
+
+class CourseLearnerLinkedTestStatsPublic(BaseModel):
+    test_id: int
+    test_title: str
+    attempts_count: int
+    best_score_percent: float | None
+    last_score_percent: float | None
+    last_attempt_at: datetime | None
+
+
+class CourseLearnerOverviewPublic(BaseModel):
+    id: int
+    title: str
+    description: str | None
+    restaurant_name: str | None
+    job_title_name: str | None
+    total_blocks: int
+    completed_blocks: int
+    progress_percent: float
+    is_completed: bool
+    blocks: list[CourseLearnerBlockProgressPublic]
+    linked_test_stats: CourseLearnerLinkedTestStatsPublic | None
+
+
+class CourseLearnerStudyPublic(BaseModel):
+    course: CoursePublic
+    blocks_progress: list[CourseLearnerBlockProgressPublic]
+    progress_percent: float
+    linked_test_stats: CourseLearnerLinkedTestStatsPublic | None
+
+
 CourseBlockCreate.model_rebuild()
 CourseBlockPublic.model_rebuild()

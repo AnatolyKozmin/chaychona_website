@@ -7,12 +7,16 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.db.session import get_db
-from app.models.course import Course, CourseBlock, CourseSubBlock
-from app.models.quiz import QuizTest
+from app.models.course import Course, CourseBlock, CourseBlockProgress, CourseSubBlock
+from app.models.quiz import QuizAttempt, QuizTest
 from app.models.user import JobTitleCatalog, RestaurantCatalog, Role, User
 from app.schemas.course import (
     CourseBlockPublic,
     CourseCreate,
+    CourseLearnerBlockProgressPublic,
+    CourseLearnerLinkedTestStatsPublic,
+    CourseLearnerOverviewPublic,
+    CourseLearnerStudyPublic,
     CourseLinkedTestPublic,
     CoursePublic,
     CourseSubBlockPublic,
@@ -103,6 +107,105 @@ def _normalize_required_text(value: str | None, field_name: str) -> str:
     if not normalized:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Поле {field_name} не может быть пустым")
     return normalized
+
+
+def _query_courses_for_user(db: Session, current_user: User) -> list[Course]:
+    courses = list(db.scalars(select(Course).where(Course.is_active.is_(True)).order_by(Course.created_at.desc())).all())
+    if current_user.role in {Role.SUPERADMIN, Role.ADMIN}:
+        return courses
+
+    user_restaurant = _norm(current_user.restaurant)
+    user_job_title = _norm(current_user.job_title)
+    filtered: list[Course] = []
+    for course in courses:
+        course_restaurant = db.get(RestaurantCatalog, course.restaurant_id) if course.restaurant_id else None
+        course_job_title = db.get(JobTitleCatalog, course.job_title_id) if course.job_title_id else None
+        matches_restaurant = (
+            True if not course_restaurant else (_norm(course_restaurant.name) == user_restaurant and bool(user_restaurant))
+        )
+        matches_role = True if not course_job_title else (_norm(course_job_title.name) == user_job_title and bool(user_job_title))
+        if matches_restaurant and matches_role:
+            filtered.append(course)
+    return filtered
+
+
+def _build_linked_test_stats(db: Session, current_user: User, course: Course) -> CourseLearnerLinkedTestStatsPublic | None:
+    if not course.linked_test_id:
+        return None
+    linked_test = db.get(QuizTest, course.linked_test_id)
+    if not linked_test:
+        return None
+    attempts = list(
+        db.scalars(
+            select(QuizAttempt)
+            .where(QuizAttempt.user_id == current_user.id, QuizAttempt.test_id == course.linked_test_id)
+            .order_by(QuizAttempt.finished_at.desc())
+        ).all()
+    )
+    if not attempts:
+        return CourseLearnerLinkedTestStatsPublic(
+            test_id=linked_test.id,
+            test_title=linked_test.title,
+            attempts_count=0,
+            best_score_percent=None,
+            last_score_percent=None,
+            last_attempt_at=None,
+        )
+
+    def score_percent(attempt: QuizAttempt) -> float:
+        if attempt.total_questions <= 0:
+            return 0.0
+        return (attempt.correct_answers / attempt.total_questions) * 100.0
+
+    best = max(score_percent(a) for a in attempts)
+    last = score_percent(attempts[0])
+    return CourseLearnerLinkedTestStatsPublic(
+        test_id=linked_test.id,
+        test_title=linked_test.title,
+        attempts_count=len(attempts),
+        best_score_percent=round(best, 2),
+        last_score_percent=round(last, 2),
+        last_attempt_at=attempts[0].finished_at,
+    )
+
+
+def _build_blocks_progress(
+    db: Session, current_user: User, course: Course
+) -> tuple[list[CourseLearnerBlockProgressPublic], int, int, float]:
+    blocks = list(
+        db.scalars(select(CourseBlock).where(CourseBlock.course_id == course.id).order_by(CourseBlock.sort_order.asc())).all()
+    )
+    progress_rows = list(
+        db.scalars(
+            select(CourseBlockProgress).where(
+                CourseBlockProgress.user_id == current_user.id, CourseBlockProgress.course_id == course.id
+            )
+        ).all()
+    )
+    completed_by_block_id = {row.block_id: row for row in progress_rows}
+    blocks_progress: list[CourseLearnerBlockProgressPublic] = []
+    completed_so_far = 0
+    for idx, block in enumerate(blocks):
+        row = completed_by_block_id.get(block.id)
+        is_completed = row is not None
+        is_unlocked = idx == 0 or completed_so_far == idx
+        blocks_progress.append(
+            CourseLearnerBlockProgressPublic(
+                block_id=block.id,
+                title=block.heading or f"Блок {idx + 1}",
+                sort_order=block.sort_order,
+                is_completed=is_completed,
+                completed_at=row.completed_at if row else None,
+                is_unlocked=is_unlocked or is_completed,
+            )
+        )
+        if is_completed:
+            completed_so_far += 1
+
+    total = len(blocks)
+    completed = sum(1 for block in blocks if block.id in completed_by_block_id)
+    percent = round((completed / total) * 100.0, 2) if total > 0 else 0.0
+    return blocks_progress, completed, total, percent
 
 
 def _replace_blocks(db: Session, course_id: int, blocks_data):
@@ -251,20 +354,108 @@ def list_my_courses(
     current_user: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN, Role.LEARNER)),
     db: Session = Depends(get_db),
 ):
-    courses = list(db.scalars(select(Course).where(Course.is_active.is_(True)).order_by(Course.created_at.desc())).all())
-    if current_user.role in {Role.SUPERADMIN, Role.ADMIN}:
-        return [_build_course_public(db, course) for course in courses]
+    courses = _query_courses_for_user(db, current_user)
+    return [_build_course_public(db, course) for course in courses]
 
-    user_restaurant = _norm(current_user.restaurant)
-    user_job_title = _norm(current_user.job_title)
-    filtered: list[Course] = []
+
+@router.get("/my-overview", response_model=list[CourseLearnerOverviewPublic])
+def list_my_courses_overview(
+    current_user: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN, Role.LEARNER)),
+    db: Session = Depends(get_db),
+):
+    courses = _query_courses_for_user(db, current_user)
+    response: list[CourseLearnerOverviewPublic] = []
     for course in courses:
-        course_restaurant = db.get(RestaurantCatalog, course.restaurant_id) if course.restaurant_id else None
-        course_job_title = db.get(JobTitleCatalog, course.job_title_id) if course.job_title_id else None
-        matches_restaurant = (
-            True if not course_restaurant else (_norm(course_restaurant.name) == user_restaurant and bool(user_restaurant))
+        course_public = _build_course_public(db, course)
+        blocks_progress, completed_blocks, total_blocks, progress_percent = _build_blocks_progress(db, current_user, course)
+        response.append(
+            CourseLearnerOverviewPublic(
+                id=course_public.id,
+                title=course_public.title,
+                description=course_public.description,
+                restaurant_name=course_public.restaurant_name,
+                job_title_name=course_public.job_title_name,
+                total_blocks=total_blocks,
+                completed_blocks=completed_blocks,
+                progress_percent=progress_percent,
+                is_completed=bool(total_blocks > 0 and completed_blocks >= total_blocks),
+                blocks=blocks_progress,
+                linked_test_stats=_build_linked_test_stats(db, current_user, course),
+            )
         )
-        matches_role = True if not course_job_title else (_norm(course_job_title.name) == user_job_title and bool(user_job_title))
-        if matches_restaurant and matches_role:
-            filtered.append(course)
-    return [_build_course_public(db, course) for course in filtered]
+    return response
+
+
+@router.get("/my/{course_id}/study", response_model=CourseLearnerStudyPublic)
+def get_my_course_study(
+    course_id: int,
+    current_user: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN, Role.LEARNER)),
+    db: Session = Depends(get_db),
+):
+    courses = _query_courses_for_user(db, current_user)
+    course = next((item for item in courses if item.id == course_id), None)
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Курс не найден")
+    course_public = _build_course_public(db, course)
+    blocks_progress, _, _, progress_percent = _build_blocks_progress(db, current_user, course)
+    return CourseLearnerStudyPublic(
+        course=course_public,
+        blocks_progress=blocks_progress,
+        progress_percent=progress_percent,
+        linked_test_stats=_build_linked_test_stats(db, current_user, course),
+    )
+
+
+@router.post("/my/{course_id}/blocks/{block_id}/complete", response_model=CourseLearnerStudyPublic)
+def complete_my_course_block(
+    course_id: int,
+    block_id: int,
+    current_user: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN, Role.LEARNER)),
+    db: Session = Depends(get_db),
+):
+    courses = _query_courses_for_user(db, current_user)
+    course = next((item for item in courses if item.id == course_id), None)
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Курс не найден")
+
+    blocks = list(
+        db.scalars(select(CourseBlock).where(CourseBlock.course_id == course.id).order_by(CourseBlock.sort_order.asc())).all()
+    )
+    if not blocks:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="У курса нет блоков")
+    block_ids = [item.id for item in blocks]
+    if block_id not in block_ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Блок не найден")
+    block_index = block_ids.index(block_id)
+
+    if block_index > 0:
+        prev_block_id = block_ids[block_index - 1]
+        prev_progress = db.scalar(
+            select(CourseBlockProgress).where(
+                CourseBlockProgress.user_id == current_user.id,
+                CourseBlockProgress.course_id == course.id,
+                CourseBlockProgress.block_id == prev_block_id,
+            )
+        )
+        if not prev_progress:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Сначала завершите предыдущий блок")
+
+    progress = db.scalar(
+        select(CourseBlockProgress).where(
+            CourseBlockProgress.user_id == current_user.id,
+            CourseBlockProgress.course_id == course.id,
+            CourseBlockProgress.block_id == block_id,
+        )
+    )
+    if not progress:
+        db.add(CourseBlockProgress(user_id=current_user.id, course_id=course.id, block_id=block_id))
+        db.commit()
+
+    course_public = _build_course_public(db, course)
+    blocks_progress, _, _, progress_percent = _build_blocks_progress(db, current_user, course)
+    return CourseLearnerStudyPublic(
+        course=course_public,
+        blocks_progress=blocks_progress,
+        progress_percent=progress_percent,
+        linked_test_stats=_build_linked_test_stats(db, current_user, course),
+    )
