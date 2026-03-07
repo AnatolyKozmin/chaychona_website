@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -108,12 +108,10 @@ def _normalize_required_text(value: str | None, field_name: str) -> str:
 def _replace_blocks(db: Session, course_id: int, blocks_data):
     if not blocks_data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Добавьте хотя бы один блок")
-    existing = list(db.scalars(select(CourseBlock).where(CourseBlock.course_id == course_id)).all())
-    for block in existing:
-        subblocks = list(db.scalars(select(CourseSubBlock).where(CourseSubBlock.block_id == block.id)).all())
-        for subblock in subblocks:
-            db.delete(subblock)
-        db.delete(block)
+    block_ids = list(db.scalars(select(CourseBlock.id).where(CourseBlock.course_id == course_id)).all())
+    if block_ids:
+        db.execute(delete(CourseSubBlock).where(CourseSubBlock.block_id.in_(block_ids)))
+    db.execute(delete(CourseBlock).where(CourseBlock.course_id == course_id))
     db.flush()
     for idx, block in enumerate(blocks_data):
         subblocks_data = getattr(block, "subblocks", None) or []
