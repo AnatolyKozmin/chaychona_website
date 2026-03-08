@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { api } from "../api/client";
+import { useBodyScrollLock } from "../composables/useBodyScrollLock";
 import { useAuthStore } from "../stores/auth";
 
 interface DishCategory {
@@ -673,6 +674,8 @@ watch(
     }
   }
 );
+
+useBodyScrollLock(computed(() => categoryModalOpen.value || dishModalOpen.value || branchModalOpen.value));
 </script>
 
 <template>
@@ -759,25 +762,27 @@ watch(
           <button type="button" @click="openCreateCategoryModal">Создать категорию</button>
         </div>
       </div>
-      <div v-if="categoriesPanelOpen" class="menu-category-panel">
-        <label>Поиск по категориям</label>
-        <input v-model="categorySearch" placeholder="Название или ветка" />
-        <div class="menu-category-list">
-          <div class="menu-category-item" v-for="cat in filteredAdminCategories" :key="cat.id">
-            <div>
-              <strong>{{ cat.name }}</strong>
-              <p class="muted" style="margin: 4px 0 0 0">
-                {{ cat.menu_type || "без ветки" }} · {{ getRestaurantName(cat.restaurant_id || null) }}
-              </p>
+      <Transition name="fade-slide">
+        <div v-if="categoriesPanelOpen" class="menu-category-panel">
+          <label>Поиск по категориям</label>
+          <input v-model="categorySearch" placeholder="Название или ветка" />
+          <div class="menu-category-list">
+            <div class="menu-category-item" v-for="cat in filteredAdminCategories" :key="cat.id">
+              <div>
+                <strong>{{ cat.name }}</strong>
+                <p class="muted" style="margin: 4px 0 0 0">
+                  {{ cat.menu_type || "без ветки" }} · {{ getRestaurantName(cat.restaurant_id || null) }}
+                </p>
+              </div>
+              <div class="actions-row">
+                <button type="button" class="ghost" @click="openEditCategoryModal(cat)">Редактировать</button>
+                <button type="button" @click="deleteCategory(cat.id)">Удалить</button>
+              </div>
             </div>
-            <div class="actions-row">
-              <button type="button" class="ghost" @click="openEditCategoryModal(cat)">Редактировать</button>
-              <button type="button" @click="deleteCategory(cat.id)">Удалить</button>
-            </div>
+            <p v-if="filteredAdminCategories.length === 0" class="muted">Категории не найдены.</p>
           </div>
-          <p v-if="filteredAdminCategories.length === 0" class="muted">Категории не найдены.</p>
         </div>
-      </div>
+      </Transition>
     </div>
 
     <div class="card">
@@ -836,22 +841,24 @@ watch(
               <span class="status-chip status-chip-muted">{{ group.inactiveCount }} неакт.</span>
             </span>
           </button>
-          <div v-if="isCategoryGroupOpen(group.id)" class="menu-group-body">
-            <div class="menu-dish-row" v-for="dish in group.dishes" :key="dish.id">
-              <div>
-                <strong>{{ dish.name }}</strong>
-                <p class="muted" style="margin: 4px 0 0 0">
-                  {{ getRestaurantName(dish.restaurant_id) }} · фото:
-                  {{ dish.photo_dish_path ? "да" : "нет" }} · аудио: {{ dish.audio_path ? "да" : "нет" }} · видео:
-                  {{ dish.video_path ? "да" : "нет" }}
-                </p>
-              </div>
-              <div class="actions-row">
-                <button type="button" class="ghost" @click="openEditDishModal(dish)">Редактировать</button>
-                <button type="button" @click="deleteDish(dish.id)">Удалить</button>
+          <Transition name="accordion">
+            <div v-if="isCategoryGroupOpen(group.id)" class="menu-group-body">
+              <div class="menu-dish-row" v-for="dish in group.dishes" :key="dish.id">
+                <div>
+                  <strong>{{ dish.name }}</strong>
+                  <p class="muted" style="margin: 4px 0 0 0">
+                    {{ getRestaurantName(dish.restaurant_id) }} · фото:
+                    {{ dish.photo_dish_path ? "да" : "нет" }} · аудио: {{ dish.audio_path ? "да" : "нет" }} · видео:
+                    {{ dish.video_path ? "да" : "нет" }}
+                  </p>
+                </div>
+                <div class="actions-row">
+                  <button type="button" class="ghost" @click="openEditDishModal(dish)">Редактировать</button>
+                  <button type="button" @click="deleteDish(dish.id)">Удалить</button>
+                </div>
               </div>
             </div>
-          </div>
+          </Transition>
         </div>
         <p v-if="groupedDishes.length === 0" class="muted">Для выбранного ресторана пока нет позиций.</p>
         <p v-else-if="visibleGroups.length === 0" class="muted">В выбранной категории пока нет позиций.</p>
@@ -859,8 +866,9 @@ watch(
     </div>
   </section>
 
-  <div v-if="categoryModalOpen" class="modal-backdrop" @click.self="categoryModalOpen = false">
-    <div class="modal-window">
+  <Transition name="fade-scale">
+    <div v-if="categoryModalOpen" class="modal-backdrop" @click.self="categoryModalOpen = false">
+      <div class="modal-window">
       <div class="actions-row">
         <h3 style="margin: 0">{{ editingCategoryId ? "Редактирование категории" : "Новая категория" }}</h3>
         <button type="button" class="ghost" @click="categoryModalOpen = false">Закрыть</button>
@@ -894,11 +902,13 @@ watch(
           <button type="button" class="ghost" @click="openCreateCategoryModal">Очистить</button>
         </div>
       </form>
+      </div>
     </div>
-  </div>
+  </Transition>
 
-  <div v-if="dishModalOpen" class="modal-backdrop" @click.self="dishModalOpen = false">
-    <div class="modal-window modal-window-wide">
+  <Transition name="fade-scale">
+    <div v-if="dishModalOpen" class="modal-backdrop" @click.self="dishModalOpen = false">
+      <div class="modal-window modal-window-wide">
       <div class="actions-row">
         <h3 style="margin: 0">{{ editingDishId ? "Редактирование позиции" : "Новая позиция" }}</h3>
         <button type="button" class="ghost" @click="dishModalOpen = false">Закрыть</button>
@@ -970,11 +980,13 @@ watch(
           <button type="button" class="ghost" @click="openCreateDishModal">Очистить</button>
         </div>
       </form>
+      </div>
     </div>
-  </div>
+  </Transition>
 
-  <div v-if="branchModalOpen" class="modal-backdrop" @click.self="branchModalOpen = false">
-    <div class="modal-window">
+  <Transition name="fade-scale">
+    <div v-if="branchModalOpen" class="modal-backdrop" @click.self="branchModalOpen = false">
+      <div class="modal-window">
       <div class="actions-row">
         <h3 style="margin: 0">{{ editingBranchId ? "Редактирование ветки" : "Новая ветка меню" }}</h3>
         <button type="button" class="ghost" @click="branchModalOpen = false">Закрыть</button>
@@ -1006,6 +1018,7 @@ watch(
         </div>
         <p v-if="menuBranches.length === 0" class="muted">Пока нет веток меню.</p>
       </div>
+      </div>
     </div>
-  </div>
+  </Transition>
 </template>

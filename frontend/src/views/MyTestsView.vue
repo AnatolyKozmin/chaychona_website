@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { api } from "../api/client";
+import { useBodyScrollLock } from "../composables/useBodyScrollLock";
 
 type QuestionType = "single" | "multiple";
 
@@ -244,10 +245,11 @@ onMounted(async () => {
   await loadMyTests();
   await loadMyAttempts();
 });
+useBodyScrollLock(computed(() => attemptsModalOpen.value));
 </script>
 
 <template>
-  <section class="card">
+  <section class="card tests-page">
     <h2>Мои тесты</h2>
     <p class="muted">Выберите тест и пройдите его. После отправки увидите разбор, правильные ответы и историю попыток.</p>
     <p v-if="error" class="error">{{ error }}</p>
@@ -283,7 +285,7 @@ onMounted(async () => {
     </div>
 
     <div v-else-if="tab === 'available' && activeTest">
-      <div class="actions-row">
+      <div class="actions-row tests-active-header">
         <h3 style="margin: 0">{{ activeTest.title }}</h3>
         <button type="button" class="ghost" @click="resetToList">К списку тестов</button>
       </div>
@@ -297,7 +299,7 @@ onMounted(async () => {
       </div>
 
       <template v-if="!result">
-        <div v-for="(question, idx) in activeTest.questions" :key="question.id" class="clean-item">
+        <div v-for="(question, idx) in activeTest.questions" :key="question.id" class="test-question-card">
           <h4 style="margin: 0 0 8px">Вопрос {{ idx + 1 }}</h4>
           <p class="long-text" style="margin-top: 0">{{ question.text }}</p>
           <label
@@ -331,7 +333,7 @@ onMounted(async () => {
       </template>
 
       <template v-else>
-        <div class="clean-item">
+        <div class="test-summary-card">
           <h3 style="margin-top: 0">Результат</h3>
           <p><strong>Всего вопросов:</strong> {{ result.total_questions }}</p>
           <p><strong>Правильно:</strong> {{ result.correct_answers }}</p>
@@ -340,7 +342,7 @@ onMounted(async () => {
           <p v-if="result.duration_seconds !== null"><strong>Время прохождения:</strong> {{ result.duration_seconds }} сек.</p>
         </div>
 
-        <div class="clean-item" v-for="item in result.results" :key="item.question_id">
+        <div class="test-result-card" v-for="item in result.results" :key="item.question_id">
           <p class="long-text" style="margin-top: 0"><strong>{{ item.question_text }}</strong></p>
           <p>
             <strong>Статус:</strong>
@@ -359,37 +361,28 @@ onMounted(async () => {
       </div>
       <p v-if="attemptsLoading">Загрузка...</p>
       <p v-else-if="filteredAttempts.length === 0" class="muted">Прохождений пока нет.</p>
-      <div v-else class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Тест</th>
-              <th>Ресторан</th>
-              <th>Результат</th>
-              <th>Время</th>
-              <th>Дата</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="attempt in filteredAttempts" :key="attempt.id">
-              <td>{{ attempt.test_title }}</td>
-              <td>{{ attempt.user_restaurant || "-" }}</td>
-              <td>{{ attempt.correct_answers }}/{{ attempt.total_questions }} ({{ scorePercent(attempt) }}%)</td>
-              <td>{{ attempt.duration_seconds ?? "-" }} сек.</td>
-              <td>{{ new Date(attempt.finished_at).toLocaleString() }}</td>
-              <td>
-                <button type="button" class="ghost" @click="openAttemptDetails(attempt.id)">Подробнее</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div v-else class="clean-list">
+        <div v-for="attempt in filteredAttempts" :key="attempt.id" class="attempt-card">
+          <div class="actions-row">
+            <strong class="long-text">{{ attempt.test_title }}</strong>
+            <span class="result-pill" :class="scorePercent(attempt) >= 70 ? 'result-pill-success' : 'result-pill-error'">
+              {{ scorePercent(attempt) }}%
+            </span>
+          </div>
+          <p class="muted" style="margin: 6px 0 0 0">{{ attempt.user_restaurant || "-" }}</p>
+          <p class="muted" style="margin: 6px 0 0 0">
+            {{ attempt.correct_answers }}/{{ attempt.total_questions }} • {{ attempt.duration_seconds ?? "-" }} сек.
+          </p>
+          <p class="muted" style="margin: 6px 0 0 0">{{ new Date(attempt.finished_at).toLocaleString() }}</p>
+          <button type="button" class="ghost" style="margin-top: 8px" @click="openAttemptDetails(attempt.id)">Подробнее</button>
+        </div>
       </div>
     </div>
   </section>
 
-  <div v-if="attemptsModalOpen && selectedAttemptDetail" class="modal-backdrop" @click.self="closeAttemptModal">
-    <div class="modal-window modal-window-wide">
+  <Transition name="fade-scale">
+    <div v-if="attemptsModalOpen && selectedAttemptDetail" class="modal-backdrop" @click.self="closeAttemptModal">
+      <div class="modal-window modal-window-wide">
       <div class="actions-row">
         <h3 style="margin: 0">Результат прохождения</h3>
         <button type="button" class="ghost" @click="closeAttemptModal">Закрыть</button>
@@ -425,6 +418,7 @@ onMounted(async () => {
           <p><strong>Правильный ответ:</strong> {{ item.correct_options.join(", ") }}</p>
         </div>
       </div>
+      </div>
     </div>
-  </div>
+  </Transition>
 </template>
