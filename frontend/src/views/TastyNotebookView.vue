@@ -752,9 +752,9 @@ useBodyScrollLock(computed(() => categoryModalOpen.value || dishModalOpen.value 
     <p v-if="adminSuccess" class="muted">{{ adminSuccess }}</p>
 
     <div class="card">
-      <div class="actions-row">
+      <div class="category-actions-header">
         <h3 style="margin: 0">Категории</h3>
-        <div class="actions-row">
+        <div class="category-actions-buttons">
           <button type="button" class="ghost" @click="categoriesPanelOpen = !categoriesPanelOpen">
             {{ categoriesPanelOpen ? "Скрыть список" : "Показать список" }}
           </button>
@@ -789,38 +789,23 @@ useBodyScrollLock(computed(() => categoryModalOpen.value || dishModalOpen.value 
       <h3 style="margin: 0">Позиции</h3>
 
       <div class="menu-toolbar">
-        <div class="menu-toolbar-left">
-          <div class="restaurant-tabs">
-            <button
-              v-for="tab in restaurantTabs"
-              :key="tab.id"
-              type="button"
-              class="restaurant-tab"
-              :class="{ active: selectedRestaurantTab === tab.id }"
-              @click="setRestaurantTab(tab.id)"
-            >
-              {{ tab.name }}
-            </button>
+        <div class="menu-toolbar-filters">
+          <div class="filter-row">
+            <label class="filter-label">Ресторан</label>
+            <select v-model="selectedRestaurantTab" class="filter-select">
+              <option v-for="tab in restaurantTabs" :key="tab.id" :value="tab.id">
+                {{ tab.name }}
+              </option>
+            </select>
           </div>
-          <div class="category-submenu">
-            <button
-              type="button"
-              class="category-submenu-tab"
-              :class="{ active: selectedCategorySubmenu === 'all' }"
-              @click="setCategorySubmenu('all')"
-            >
-              Все категории
-            </button>
-            <button
-              v-for="item in categorySubmenuItems"
-              :key="item.key"
-              type="button"
-              class="category-submenu-tab"
-              :class="{ active: selectedCategorySubmenu === item.key }"
-              @click="setCategorySubmenu(item.key)"
-            >
-              {{ item.name }} ({{ item.count }})
-            </button>
+          <div class="filter-row">
+            <label class="filter-label">Категория</label>
+            <select v-model="selectedCategorySubmenu" class="filter-select">
+              <option value="all">Все категории</option>
+              <option v-for="item in categorySubmenuItems" :key="item.key" :value="item.key">
+                {{ item.name }} ({{ item.count }})
+              </option>
+            </select>
           </div>
         </div>
         <button type="button" class="menu-add-btn" @click="openCreateDishModal">+ Новая позиция</button>
