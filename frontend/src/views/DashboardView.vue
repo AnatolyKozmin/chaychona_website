@@ -41,6 +41,13 @@ interface DashboardOverview {
 }
 
 const overview = ref<DashboardOverview | null>(null);
+const learnerOverview = ref<{
+  total_trainings: number;
+  completed_trainings: number;
+  completed_percent: number;
+  total_tests: number;
+  attempts_count: number;
+} | null>(null);
 const canSeeDashboard = computed(() => auth.user?.role === "superadmin" || auth.user?.role === "admin");
 const isLearner = computed(() => auth.user?.role === "learner");
 
@@ -62,6 +69,17 @@ async function loadOverview() {
     if (canSeeDashboard.value) {
       const { data } = await api.get<DashboardOverview>("/dashboard/overview");
       overview.value = data;
+      learnerOverview.value = null;
+    } else if (isLearner.value) {
+      const { data } = await api.get("/dashboard/me-overview");
+      learnerOverview.value = {
+        total_trainings: data.total_trainings,
+        completed_trainings: data.completed_trainings,
+        completed_percent: data.completed_percent,
+        total_tests: data.total_tests,
+        attempts_count: data.attempts_count
+      };
+      overview.value = null;
     }
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "Не удалось загрузить дашборд";
@@ -190,24 +208,82 @@ onMounted(async () => {
 
   <hr v-else-if="isLearner" class="section-divider" />
 
-  <section v-else-if="isLearner" class="card">
-    <h2 class="section-title">Меню</h2>
-    <div class="menu-buttons-grid">
-      <RouterLink to="/standards" class="menu-button">
-        <span class="menu-button-title">Стандарты</span>
-        <span class="muted">Обучение по стандартам</span>
+  <section v-else-if="isLearner" class="card learner-dashboard">
+    <div v-if="learnerOverview && !loading" class="learner-progress-preview">
+      <div class="progress-preview-item">
+        <span class="progress-preview-value">{{ learnerOverview.completed_trainings }} из {{ learnerOverview.total_trainings }}</span>
+        <span class="progress-preview-label">обучений пройдено</span>
+      </div>
+      <div class="progress-preview-divider"></div>
+      <div class="progress-preview-item">
+        <span class="progress-preview-value">{{ learnerOverview.total_tests }}</span>
+        <span class="progress-preview-label">тестов доступно</span>
+      </div>
+      <div class="progress-preview-divider"></div>
+      <div class="progress-preview-item">
+        <span class="progress-preview-value">{{ learnerOverview.attempts_count }}</span>
+        <span class="progress-preview-label">попыток пройдено</span>
+      </div>
+    </div>
+
+    <h2 class="section-title">Доступные разделы</h2>
+    <div class="learner-menu-grid">
+      <RouterLink to="/standards" class="learner-menu-card learner-menu-card--standards">
+        <div class="learner-menu-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            <path d="M8 7h8"/>
+            <path d="M8 11h8"/>
+          </svg>
+        </div>
+        <div class="learner-menu-content">
+          <span class="learner-menu-title">Стандарты</span>
+          <span class="learner-menu-desc">Обучение по стандартам и процедурам</span>
+        </div>
+        <span class="learner-menu-arrow">→</span>
       </RouterLink>
-      <RouterLink to="/my-tests" class="menu-button">
-        <span class="menu-button-title">Мои тесты</span>
-        <span class="muted">Пройти тесты</span>
+
+      <RouterLink to="/my-tests" class="learner-menu-card learner-menu-card--tests">
+        <div class="learner-menu-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 11l3 3L22 4"/>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+          </svg>
+        </div>
+        <div class="learner-menu-content">
+          <span class="learner-menu-title">Мои тесты</span>
+          <span class="learner-menu-desc">Проверьте знания, пройдите тесты</span>
+        </div>
+        <span class="learner-menu-arrow">→</span>
       </RouterLink>
-      <RouterLink to="/tasty-notebook" class="menu-button">
-        <span class="menu-button-title">Вкусная тетрадь</span>
-        <span class="muted">Справочник продукции</span>
+
+      <RouterLink to="/tasty-notebook" class="learner-menu-card learner-menu-card--notebook">
+        <div class="learner-menu-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+          </svg>
+        </div>
+        <div class="learner-menu-content">
+          <span class="learner-menu-title">Вкусная тетрадь</span>
+          <span class="learner-menu-desc">Справочник блюд и продукции</span>
+        </div>
+        <span class="learner-menu-arrow">→</span>
       </RouterLink>
-      <RouterLink to="/statistics" class="menu-button">
-        <span class="menu-button-title">Статистика</span>
-        <span class="muted">Мой прогресс и результаты</span>
+
+      <RouterLink to="/statistics" class="learner-menu-card learner-menu-card--stats">
+        <div class="learner-menu-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3v18h18"/>
+            <path d="m19 9-5 5-4-4-3 3"/>
+          </svg>
+        </div>
+        <div class="learner-menu-content">
+          <span class="learner-menu-title">Статистика</span>
+          <span class="learner-menu-desc">Ваш прогресс и результаты</span>
+        </div>
+        <span class="learner-menu-arrow">→</span>
       </RouterLink>
     </div>
   </section>
