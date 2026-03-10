@@ -44,17 +44,6 @@ const overview = ref<DashboardOverview | null>(null);
 const canSeeDashboard = computed(() => auth.user?.role === "superadmin" || auth.user?.role === "admin");
 const isLearner = computed(() => auth.user?.role === "learner");
 
-const roleLabel = computed(() => {
-  switch (auth.user?.role) {
-    case "superadmin":
-      return "Суперадмин";
-    case "admin":
-      return "Админ";
-    default:
-      return "Обучающийся";
-  }
-});
-
 function formatDate(value: string | null): string {
   if (!value) {
     return "-";
@@ -89,14 +78,7 @@ onMounted(async () => {
 <template>
   <section class="card">
     <h2>Добро пожаловать, {{ auth.user?.full_name }}</h2>
-    <p><strong>Роль:</strong> {{ roleLabel }}</p>
     <p><strong>Ресторан:</strong> {{ auth.user?.restaurant || "Не указан" }}</p>
-    <p v-if="auth.user?.role === 'learner'">
-      <strong>Должность:</strong> {{ auth.user?.job_title || "Не указана" }}
-    </p>
-    <p class="muted">
-      Для обучающихся с разными должностями (официант, бармен и т.д.) уровень доступа одинаковый, но программа обучения может отличаться.
-    </p>
   </section>
 
   <section v-if="canSeeDashboard" class="card">
