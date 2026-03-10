@@ -356,26 +356,7 @@ watch(
     <p v-if="loading">Загрузка...</p>
 
     <template v-if="!loading">
-      <template v-if="adminAllowed">
-        <p v-if="courses.length === 0" class="muted">Стандарты пока не заполнены.</p>
-        <div v-else class="clean-list">
-          <div v-for="course in courses" :key="course.id" class="clean-item">
-            <div class="actions-row">
-              <div>
-                <div><strong>{{ course.title }}</strong></div>
-                <div class="muted" style="font-size: 12px">
-                  {{ course.restaurant_name || "Все рестораны" }} • {{ course.job_title_name || "Все роли" }}
-                </div>
-              </div>
-              <div class="actions-row">
-                <button type="button" class="ghost" @click="editCourse(course)">Редактировать</button>
-                <button type="button" @click="removeCourse(course.id)">Удалить</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </template>
-      <template v-else>
+      <template v-if="!adminAllowed">
         <p v-if="learnerCourses.length === 0" class="muted">Для вас пока нет назначенных обучений.</p>
         <div v-else class="clean-list">
           <div v-for="course in learnerCourses" :key="course.id" class="clean-item">

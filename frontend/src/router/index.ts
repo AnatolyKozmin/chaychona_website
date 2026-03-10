@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import DashboardView from "../views/DashboardView.vue";
 import LoginView from "../views/LoginView.vue";
+import StatisticsView from "../views/StatisticsView.vue";
 import MyTestsView from "../views/MyTestsView.vue";
 import StandardsView from "../views/StandardsView.vue";
 import StandardsStudyView from "../views/StandardsStudyView.vue";
@@ -17,6 +18,7 @@ const router = createRouter({
     { path: "/standards", name: "standards", component: StandardsView },
     { path: "/standards/:id", name: "standards-study", component: StandardsStudyView },
     { path: "/my-tests", name: "my-tests", component: MyTestsView },
+    { path: "/statistics", name: "statistics", component: StatisticsView },
     { path: "/tests-analytics", name: "tests-analytics", component: TestsAnalyticsView },
     { path: "/tasty-notebook", name: "tasty-notebook", component: TastyNotebookView },
     { path: "/tests", name: "tests", component: TestsAdminView },

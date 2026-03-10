@@ -57,6 +57,7 @@ watch(
         <RouterLink to="/standards">Стандарты</RouterLink>
         <RouterLink to="/my-tests">Мои тесты</RouterLink>
         <RouterLink to="/tasty-notebook">Вкусная тетрадь</RouterLink>
+        <RouterLink v-if="!auth.isSuperadmin && !auth.isAdmin" to="/statistics">Статистика</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests">Тесты</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests-analytics">Аналитика</RouterLink>
         <RouterLink v-if="auth.isAdmin" to="/users">Пользователи</RouterLink>
@@ -74,6 +75,7 @@ watch(
         <RouterLink to="/standards" @click="closeMobileMenu">Стандарты</RouterLink>
         <RouterLink to="/my-tests" @click="closeMobileMenu">Мои тесты</RouterLink>
         <RouterLink to="/tasty-notebook" @click="closeMobileMenu">Вкусная тетрадь</RouterLink>
+        <RouterLink v-if="!auth.isSuperadmin && !auth.isAdmin" to="/statistics" @click="closeMobileMenu">Статистика</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests" @click="closeMobileMenu">Тесты</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests-analytics" @click="closeMobileMenu">Аналитика</RouterLink>
         <RouterLink v-if="auth.isAdmin" to="/users" @click="closeMobileMenu">Пользователи</RouterLink>

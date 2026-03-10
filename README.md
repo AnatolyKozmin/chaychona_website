@@ -137,3 +137,28 @@ npm run dev
 ```
 
 Frontend starts on `http://localhost:5173`.
+
+## Testing
+
+### Frontend (Vitest)
+
+```bash
+cd frontend
+npm run test
+```
+
+Tests: router, DashboardView (learner menu), StatisticsView.
+
+### Backend (pytest)
+
+Requires PostgreSQL (e.g. `docker compose up -d`).
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m pytest tests/ -v
+```
+
+Tests: health, auth (login), dashboard (overview, me-overview).

@@ -460,6 +460,37 @@ tr:hover td {
   margin-bottom: 14px;
 }
 
+.menu-buttons-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.menu-button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px;
+  border: 1px solid #e7edf6;
+  border-radius: 12px;
+  background: #fbfcff;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.menu-button:hover {
+  border-color: #c5d4f0;
+  background: #f5f8ff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+
+.menu-button-title {
+  font-weight: 600;
+  font-size: 16px;
+  color: #1e293b;
+}
+
 .clean-item {
   border: 1px solid #e7edf6;
   background: #fbfcff;
