@@ -76,10 +76,12 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="card">
-    <h2>Добро пожаловать, {{ auth.user?.full_name }}</h2>
-    <p><strong>Ресторан:</strong> {{ auth.user?.restaurant || "Не указан" }}</p>
+  <section class="card card-welcome">
+    <h2 class="welcome-title">Добро пожаловать, {{ auth.user?.full_name }}</h2>
+    <p class="welcome-subtitle"><strong>Ресторан:</strong> {{ auth.user?.restaurant || "Не указан" }}</p>
   </section>
+
+  <hr v-if="canSeeDashboard" class="section-divider" />
 
   <section v-if="canSeeDashboard" class="card">
     <div class="actions-row">
@@ -186,8 +188,10 @@ onMounted(async () => {
     </template>
   </section>
 
+  <hr v-else-if="isLearner" class="section-divider" />
+
   <section v-else-if="isLearner" class="card">
-    <h2 style="margin: 0 0 16px 0">Меню</h2>
+    <h2 class="section-title">Меню</h2>
     <div class="menu-buttons-grid">
       <RouterLink to="/standards" class="menu-button">
         <span class="menu-button-title">Стандарты</span>

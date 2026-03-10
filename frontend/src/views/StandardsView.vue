@@ -406,8 +406,10 @@ watch(
     </template>
   </section>
 
+  <hr v-if="adminAllowed" class="section-divider" />
+
   <section v-if="adminAllowed" class="card">
-    <h2>Управление стандартами</h2>
+    <h2 class="section-title">Управление стандартами</h2>
     <form @submit.prevent="saveCourse">
       <label>Название</label>
       <input v-model="form.title" required />

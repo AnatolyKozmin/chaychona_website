@@ -398,116 +398,138 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="card" v-if="auth.isSuperadmin">
+  <section class="card tests-page" v-if="auth.isSuperadmin">
     <div class="actions-row">
       <h2 style="margin: 0">Конструктор тестов</h2>
       <button type="button" class="ghost" @click="goToAnalytics">Аналитика прохождений</button>
     </div>
-    <p class="muted">Выберите ресторан и роль, затем добавьте вопросы и варианты ответов.</p>
+    <p class="muted page-desc">Выберите ресторан и роль, затем добавьте вопросы и варианты ответов.</p>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="success" class="muted">{{ success }}</p>
     <p v-if="importReport" class="muted">{{ importReport }}</p>
 
-    <div class="card">
+    <hr class="card-divider" />
+
+    <div class="test-import-card card">
       <h3>Импорт из Excel</h3>
-      <div class="actions-row">
-        <button type="button" class="ghost" @click="downloadImportTemplate">Скачать шаблон с ID</button>
+      <p class="muted" style="margin: 0 0 14px 0">Загрузите файл по шаблону для массового создания тестов.</p>
+      <div class="test-import-row">
+        <button type="button" class="ghost" @click="downloadImportTemplate">Скачать шаблон</button>
+        <input type="file" accept=".xlsx" @change="onImportFileChange" class="test-file-input" />
       </div>
-      <label>Файл Excel</label>
-      <input type="file" accept=".xlsx" @change="onImportFileChange" />
-      <label style="margin-top: 10px">
+      <label class="test-checkbox-label">
         <input type="checkbox" v-model="importDryRun" />
         Dry-run (только проверка, без сохранения)
       </label>
-      <button type="button" @click="uploadImportFile" :disabled="saving">Загрузить шаблон</button>
+      <button type="button" class="test-import-btn" @click="uploadImportFile" :disabled="saving">Загрузить</button>
     </div>
 
-    <form class="card" @submit.prevent="createTest">
-      <label>Ресторан</label>
-      <select v-model="form.restaurant_id" @change="onRestaurantChange" required>
-        <option value="" disabled>Выберите ресторан</option>
-        <option v-for="restaurant in restaurants" :key="restaurant.id" :value="restaurant.id">
-          {{ restaurant.name }}
-        </option>
-      </select>
+    <hr class="card-divider" />
 
-      <label>Роль</label>
-      <select v-model="form.job_title_id" required>
-        <option value="" disabled>Выберите роль</option>
-        <option v-for="role in availableRoles" :key="role.id" :value="role.id">
-          {{ role.name }}
-        </option>
-      </select>
-
-      <label>Название теста</label>
-      <input v-model="form.title" required />
-      <label>Описание теста</label>
-      <input v-model="form.description" />
-
-      <div v-for="(question, qIdx) in form.questions" :key="qIdx" class="card">
-        <div class="actions-row">
-          <h3>Вопрос {{ qIdx + 1 }}</h3>
-          <button type="button" class="ghost" @click="removeQuestion(qIdx)">Удалить вопрос</button>
+    <form class="test-create-form card" @submit.prevent="createTest">
+      <h3>Новый тест</h3>
+      <div class="test-form-grid">
+        <div class="test-form-field">
+          <label>Ресторан</label>
+          <select v-model="form.restaurant_id" @change="onRestaurantChange" required>
+            <option value="" disabled>Выберите ресторан</option>
+            <option v-for="restaurant in restaurants" :key="restaurant.id" :value="restaurant.id">
+              {{ restaurant.name }}
+            </option>
+          </select>
         </div>
-        <label>Текст вопроса</label>
-        <input v-model="question.text" required />
-        <label>Тип ответа</label>
-        <select v-model="question.question_type" @change="onQuestionTypeChange(question)">
-          <option value="single">Один вариант</option>
-          <option value="multiple">Несколько вариантов</option>
-        </select>
-
-        <div v-for="(option, oIdx) in question.options" :key="oIdx" class="actions-row">
-          <input v-model="option.text" placeholder="Вариант ответа" required />
-          <label style="margin: 0">
-            <input
-              v-if="question.question_type === 'multiple'"
-              type="checkbox"
-              v-model="option.is_correct"
-            />
-            <input
-              v-else
-              type="radio"
-              :checked="option.is_correct"
-              @change="setCorrectSingle(question, oIdx)"
-            />
-            Верный
-          </label>
-          <button type="button" class="ghost" @click="removeOption(question, oIdx)">-</button>
+        <div class="test-form-field">
+          <label>Роль</label>
+          <select v-model="form.job_title_id" required>
+            <option value="" disabled>Выберите роль</option>
+            <option v-for="role in availableRoles" :key="role.id" :value="role.id">
+              {{ role.name }}
+            </option>
+          </select>
         </div>
-        <button type="button" class="ghost" @click="addOption(question)">Добавить вариант</button>
+      </div>
+      <div class="test-form-field">
+        <label>Название теста</label>
+        <input v-model="form.title" required placeholder="Например: Базовый тест официанта" />
+      </div>
+      <div class="test-form-field">
+        <label>Описание (опционально)</label>
+        <input v-model="form.description" placeholder="Краткое описание теста" />
       </div>
 
-      <button type="button" class="ghost" @click="addQuestion">Добавить вопрос</button>
-      <button type="submit" :disabled="saving">Сохранить тест</button>
+      <div class="test-questions-block">
+        <h4>Вопросы</h4>
+        <div v-for="(question, qIdx) in form.questions" :key="qIdx" class="test-question-card">
+          <div class="test-question-header">
+            <span class="test-question-num">Вопрос {{ qIdx + 1 }}</span>
+            <button type="button" class="ghost test-question-remove" @click="removeQuestion(qIdx)">Удалить</button>
+          </div>
+          <div class="test-form-field">
+            <label>Текст вопроса</label>
+            <textarea v-model="question.text" required rows="2" placeholder="Введите текст вопроса" class="test-question-text"></textarea>
+          </div>
+          <div class="test-form-field test-type-select">
+            <label>Тип ответа</label>
+            <select v-model="question.question_type" @change="onQuestionTypeChange(question)">
+              <option value="single">Один правильный вариант</option>
+              <option value="multiple">Несколько правильных вариантов</option>
+            </select>
+          </div>
+
+          <div class="test-options-block">
+            <label>Варианты ответов</label>
+            <div v-for="(option, oIdx) in question.options" :key="oIdx" class="test-option-row">
+              <input
+                v-if="question.question_type === 'single'"
+                type="radio"
+                :name="`q-${qIdx}`"
+                :checked="option.is_correct"
+                @change="setCorrectSingle(question, oIdx)"
+                class="test-option-radio"
+              />
+              <input
+                v-else
+                type="checkbox"
+                v-model="option.is_correct"
+                class="test-option-checkbox"
+              />
+              <input v-model="option.text" placeholder="Вариант ответа" required class="test-option-input" />
+              <button type="button" class="ghost test-option-remove" @click="removeOption(question, oIdx)" title="Удалить">×</button>
+            </div>
+            <button type="button" class="ghost test-add-option" @click="addOption(question)">+ Добавить вариант</button>
+          </div>
+        </div>
+        <button type="button" class="ghost test-add-question" @click="addQuestion">+ Добавить вопрос</button>
+      </div>
+
+      <div class="test-form-actions">
+        <button type="submit" class="test-submit-btn" :disabled="saving">Создать тест</button>
+      </div>
     </form>
 
-    <div class="card">
-      <div class="actions-row">
+    <hr class="card-divider" />
+
+    <div class="card test-list-card">
+      <div class="test-list-header">
         <h3>Созданные тесты</h3>
         <button type="button" class="ghost" @click="loadTests">Обновить</button>
       </div>
       <p v-if="loading">Загрузка...</p>
-      <p v-else-if="tests.length === 0" class="muted">Тестов пока нет.</p>
-      <div v-else class="card">
-        <div>
-          <button
-            v-for="test in tests"
-            :key="test.id"
-            type="button"
-            class="ghost"
-            style="display: block; width: 100%; text-align: left; margin-bottom: 8px; padding: 10px 12px"
-            @click="openTestModal(test)"
-          >
-            <div>{{ test.title }}</div>
-            <div class="muted" style="font-size: 12px; margin-top: 4px">
-              Ресторан: {{ test.restaurant_name }} • Для: {{ test.job_title_name }}
-            </div>
-            <div class="muted" style="font-size: 12px; margin-top: 2px" v-if="test.external_code">
-              Код: {{ test.external_code }}
-            </div>
-          </button>
-        </div>
+      <p v-else-if="tests.length === 0" class="muted">Тестов пока нет. Создайте первый тест выше.</p>
+      <div v-else class="test-list">
+        <button
+          v-for="test in tests"
+          :key="test.id"
+          type="button"
+          class="test-list-item"
+          @click="openTestModal(test)"
+        >
+          <div class="test-list-item-title">{{ test.title }}</div>
+          <div class="test-list-item-meta">
+            {{ test.restaurant_name }} · {{ test.job_title_name }}
+            <span v-if="test.external_code" class="test-list-item-code">{{ test.external_code }}</span>
+          </div>
+        </button>
       </div>
     </div>
   </section>
@@ -545,63 +567,80 @@ onMounted(async () => {
       </template>
 
       <template v-else>
-        <label>Название теста</label>
-        <input v-model="editForm.title" required />
-        <label>Описание теста</label>
-        <input v-model="editForm.description" />
-        <label>Ресторан</label>
-        <select v-model="editForm.restaurant_id" @change="onEditRestaurantChange" required>
-          <option value="" disabled>Выберите ресторан</option>
-          <option v-for="restaurant in restaurants" :key="restaurant.id" :value="restaurant.id">
-            {{ restaurant.name }}
-          </option>
-        </select>
-        <label>Роль</label>
-        <select v-model="editForm.job_title_id" required>
-          <option value="" disabled>Выберите роль</option>
-          <option v-for="role in editAvailableRoles" :key="role.id" :value="role.id">
-            {{ role.name }}
-          </option>
-        </select>
-
-        <div v-for="(question, qIdx) in editForm.questions" :key="qIdx" class="card">
-          <div class="actions-row">
-            <h4 style="margin: 0">Вопрос {{ qIdx + 1 }}</h4>
-            <button type="button" class="ghost" @click="removeEditQuestion(qIdx)">Удалить</button>
+        <div class="test-form-field">
+          <label>Название теста</label>
+          <input v-model="editForm.title" required />
+        </div>
+        <div class="test-form-field">
+          <label>Описание теста</label>
+          <input v-model="editForm.description" />
+        </div>
+        <div class="test-form-grid">
+          <div class="test-form-field">
+            <label>Ресторан</label>
+            <select v-model="editForm.restaurant_id" @change="onEditRestaurantChange" required>
+              <option value="" disabled>Выберите ресторан</option>
+              <option v-for="restaurant in restaurants" :key="restaurant.id" :value="restaurant.id">
+                {{ restaurant.name }}
+              </option>
+            </select>
           </div>
-          <label>Текст вопроса</label>
-          <input v-model="question.text" required />
-          <label>Тип ответа</label>
-          <select v-model="question.question_type" @change="onEditQuestionTypeChange(question)">
-            <option value="single">Один вариант</option>
-            <option value="multiple">Несколько вариантов</option>
-          </select>
+          <div class="test-form-field">
+            <label>Роль</label>
+            <select v-model="editForm.job_title_id" required>
+              <option value="" disabled>Выберите роль</option>
+              <option v-for="role in editAvailableRoles" :key="role.id" :value="role.id">
+                {{ role.name }}
+              </option>
+            </select>
+          </div>
+        </div>
 
-          <div v-for="(option, oIdx) in question.options" :key="oIdx" class="actions-row">
-            <input v-model="option.text" placeholder="Вариант ответа" required />
-            <label style="margin: 0">
+        <div v-for="(question, qIdx) in editForm.questions" :key="qIdx" class="test-question-card">
+          <div class="test-question-header">
+            <span class="test-question-num">Вопрос {{ qIdx + 1 }}</span>
+            <button type="button" class="ghost test-question-remove" @click="removeEditQuestion(qIdx)">Удалить</button>
+          </div>
+          <div class="test-form-field">
+            <label>Текст вопроса</label>
+            <textarea v-model="question.text" required rows="2" class="test-question-text"></textarea>
+          </div>
+          <div class="test-form-field test-type-select">
+            <label>Тип ответа</label>
+            <select v-model="question.question_type" @change="onEditQuestionTypeChange(question)">
+              <option value="single">Один правильный вариант</option>
+              <option value="multiple">Несколько правильных вариантов</option>
+            </select>
+          </div>
+
+          <div class="test-options-block">
+            <label>Варианты ответов</label>
+            <div v-for="(option, oIdx) in question.options" :key="oIdx" class="test-option-row">
               <input
-                v-if="question.question_type === 'multiple'"
-                type="checkbox"
-                v-model="option.is_correct"
+                v-if="question.question_type === 'single'"
+                type="radio"
+                :name="`edit-q-${qIdx}`"
+                :checked="option.is_correct"
+                @change="setEditCorrectSingle(question, oIdx)"
+                class="test-option-radio"
               />
               <input
                 v-else
-                type="radio"
-                :checked="option.is_correct"
-                @change="setEditCorrectSingle(question, oIdx)"
+                type="checkbox"
+                v-model="option.is_correct"
+                class="test-option-checkbox"
               />
-              Верный
-            </label>
-            <button type="button" class="ghost" @click="removeEditOption(question, oIdx)">-</button>
+              <input v-model="option.text" placeholder="Вариант ответа" required class="test-option-input" />
+              <button type="button" class="ghost test-option-remove" @click="removeEditOption(question, oIdx)">×</button>
+            </div>
+            <button type="button" class="ghost test-add-option" @click="addEditOption(question)">+ Добавить вариант</button>
           </div>
-          <button type="button" class="ghost" @click="addEditOption(question)">Добавить вариант</button>
         </div>
 
-        <div class="actions-row">
-          <button type="button" class="ghost" @click="addEditQuestion">Добавить вопрос</button>
+        <div class="test-form-actions">
+          <button type="button" class="ghost" @click="addEditQuestion">+ Добавить вопрос</button>
           <button type="button" class="ghost" @click="editMode = false">Отмена</button>
-          <button type="button" @click="saveEditedTest" :disabled="saving">Сохранить</button>
+          <button type="button" @click="saveEditedTest" :disabled="saving" class="test-submit-btn">Сохранить</button>
         </div>
       </template>
     </div>

@@ -153,6 +153,8 @@ onMounted(async () => {
         </div>
       </div>
 
+      <hr class="card-divider" />
+
       <div class="card">
         <h3>Динамика за 7 дней</h3>
         <div class="progress-chart">
@@ -170,6 +172,8 @@ onMounted(async () => {
         </div>
       </div>
 
+      <hr class="card-divider" />
+
       <div class="card">
         <h3>Лучший результат</h3>
         <p v-if="!learnerOverview.best_result" class="muted">Пока нет попыток.</p>
@@ -180,6 +184,8 @@ onMounted(async () => {
         </template>
       </div>
 
+      <hr class="card-divider" />
+
       <div class="card">
         <h3>Худший результат</h3>
         <p v-if="!learnerOverview.worst_result" class="muted">Пока нет попыток.</p>
@@ -189,6 +195,8 @@ onMounted(async () => {
           <p><strong>Дата:</strong> {{ formatDate(learnerOverview.worst_result.finished_at) }}</p>
         </template>
       </div>
+
+      <hr class="card-divider" />
 
       <div class="card">
         <h3>Мои попытки</h3>
