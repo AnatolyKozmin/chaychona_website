@@ -1,12 +1,14 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.user import RegistrationRequestStatus, Role
 
 
 class UserPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     email: str
     full_name: str
@@ -15,9 +17,6 @@ class UserPublic(BaseModel):
     job_title: str | None
     is_active: bool
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class SetRoleRequest(BaseModel):
@@ -44,6 +43,8 @@ class CreateUserRequest(BaseModel):
 
 
 class RegistrationRequestPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     first_name: str
     last_name: str
@@ -55,9 +56,6 @@ class RegistrationRequestPublic(BaseModel):
     created_at: datetime
     processed_at: datetime | None
 
-    class Config:
-        from_attributes = True
-
 
 class CatalogItemCreate(BaseModel):
     name: str = Field(min_length=2, max_length=255)
@@ -68,18 +66,16 @@ class JobTitleCatalogItemCreate(CatalogItemCreate):
 
 
 class CatalogItemPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     name: str
 
-    class Config:
-        from_attributes = True
-
 
 class JobTitleCatalogItemPublic(CatalogItemPublic):
-    restaurant_id: UUID | None
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        from_attributes = True
+    restaurant_id: UUID | None
 
 
 class RestaurantWithRolesPublic(BaseModel):

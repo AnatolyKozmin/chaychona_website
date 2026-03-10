@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -22,27 +23,10 @@ from app.models import menu as _menu_models  # noqa: F401
 from app.models import quiz as _quiz_models  # noqa: F401
 from app.models.user import RestaurantCatalog, Role, User
 
-app = FastAPI(title="Restaurant Training API")
 settings = get_settings()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-app.include_router(auth_router, prefix="/api/v1")
-app.include_router(users_router, prefix="/api/v1")
-app.include_router(menu_router, prefix="/api/v1")
-app.include_router(tests_router, prefix="/api/v1")
-app.include_router(dashboard_router, prefix="/api/v1")
-app.include_router(courses_router, prefix="/api/v1")
-
-
-@app.on_event("startup")
-def startup_event() -> None:
+def _run_startup() -> None:
     Base.metadata.create_all(bind=engine)
     with engine.begin() as connection:
         connection.execute(
@@ -227,6 +211,30 @@ def startup_event() -> None:
         db.commit()
     finally:
         db.close()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    _run_startup()
+    yield
+
+
+app = FastAPI(title="Restaurant Training API", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(users_router, prefix="/api/v1")
+app.include_router(menu_router, prefix="/api/v1")
+app.include_router(tests_router, prefix="/api/v1")
+app.include_router(dashboard_router, prefix="/api/v1")
+app.include_router(courses_router, prefix="/api/v1")
 
 
 @app.get("/health")

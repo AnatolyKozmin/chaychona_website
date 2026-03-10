@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.quiz import QuestionType
 
@@ -26,13 +26,12 @@ class QuizTestCreate(BaseModel):
 
 
 class QuizOptionPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     text: str
     is_correct: bool
     sort_order: int
-
-    class Config:
-        from_attributes = True
 
 
 class QuizQuestionPublic(BaseModel):
