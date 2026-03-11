@@ -1178,6 +1178,52 @@ tr:hover td {
   margin-top: 10px;
 }
 
+/* Вкусная тетрадь — кнопки категорий */
+.notebook-category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.notebook-category-btn {
+  width: 100%;
+  margin: 0;
+  padding: 16px 18px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 1rem;
+  border-radius: 12px;
+  border: 1px solid #e5ebf6;
+  background: #fbfcff;
+  color: #1e293b;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.notebook-category-btn:hover {
+  border-color: #c5d4f0;
+  background: #f5f8ff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+
+.notebook-back-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.notebook-back-btn {
+  flex-shrink: 0;
+  padding: 8px 12px;
+}
+
+.notebook-category-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #475569;
+}
+
 .menu-category-panel {
   margin-top: 10px;
 }

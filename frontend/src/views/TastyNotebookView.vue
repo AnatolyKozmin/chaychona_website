@@ -61,6 +61,8 @@ const auth = useAuthStore();
 const dishes = ref<DishCard[]>([]);
 const categories = ref<DishCategory[]>([]);
 const selectedCategory = ref("");
+const selectedCategoryLabel = ref(""); // для заголовка при просмотре блюд
+const showCategoriesView = ref(true); // сначала категории, потом блюда
 const loading = ref(false);
 const error = ref("");
 const currentIndex = ref(0);
@@ -550,8 +552,19 @@ async function deleteDish(dishId: number) {
   }
 }
 
-function onCategoryChange() {
-  void loadDishes();
+async function selectCategory(categoryName: string, categoryLabel: string) {
+  selectedCategory.value = categoryName;
+  selectedCategoryLabel.value = categoryLabel;
+  showCategoriesView.value = false;
+  await loadDishes();
+}
+
+function goBackToCategories() {
+  showCategoriesView.value = true;
+  selectedCategory.value = "";
+  selectedCategoryLabel.value = "";
+  dishes.value = [];
+  currentIndex.value = 0;
 }
 
 function setRestaurantTab(tabId: string) {
@@ -628,7 +641,6 @@ function onPointerUp() {
 
 onMounted(() => {
   void loadCategories();
-  void loadDishes();
   if (isSuperadmin.value) {
     void loadRestaurants();
     void loadMenuBranches();
@@ -681,20 +693,46 @@ useBodyScrollLock(computed(() => categoryModalOpen.value || dishModalOpen.value 
 <template>
   <section class="card">
     <h2>Вкусная тетрадь</h2>
-    <label>Категория</label>
-    <select v-model="selectedCategory" @change="onCategoryChange">
-      <option value="">Все категории</option>
-      <option v-for="category in categories" :key="category.id" :value="category.name">
-        {{ category.name }}
-      </option>
-    </select>
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="loading">Загрузка...</p>
-    <p v-else-if="!currentDish">Блюда пока не импортированы.</p>
 
-    <div
-      v-else
-      class="tinder-card"
+    <!-- Экран выбора категорий -->
+    <div v-if="showCategoriesView">
+      <p class="page-desc" style="margin-bottom: 18px">Выберите категорию, чтобы просмотреть блюда</p>
+      <div class="notebook-category-grid">
+        <button
+          type="button"
+          class="notebook-category-btn"
+          @click="selectCategory('', 'Все категории')"
+        >
+          Все категории
+        </button>
+        <button
+          v-for="category in categories"
+          :key="category.id"
+          type="button"
+          class="notebook-category-btn"
+          @click="selectCategory(category.name, category.name)"
+        >
+          {{ category.name }}
+        </button>
+      </div>
+      <p v-if="categories.length === 0" class="muted">Категории пока не загружены.</p>
+    </div>
+
+    <!-- Экран блюд со свайпами -->
+    <div v-else>
+      <div class="notebook-back-row">
+        <button type="button" class="ghost notebook-back-btn" @click="goBackToCategories">
+          ← Назад
+        </button>
+        <span class="notebook-category-title">{{ selectedCategoryLabel }}</span>
+      </div>
+      <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="loading">Загрузка...</p>
+      <p v-else-if="!currentDish">В этой категории пока нет блюд.</p>
+
+      <div
+        v-else
+        class="tinder-card"
       :style="{ transform: `translateX(${cardOffsetX}px) rotate(${cardOffsetX / 18}deg)` }"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
@@ -739,9 +777,10 @@ useBodyScrollLock(computed(() => categoryModalOpen.value || dishModalOpen.value 
       />
     </div>
 
-    <div v-if="currentDish" class="tinder-actions">
-      <button type="button" class="ghost" :disabled="!hasPrev" @click="goPrev">Предыдущее</button>
-      <button type="button" :disabled="!hasNext" @click="goNext">Следующее</button>
+      <div v-if="currentDish" class="tinder-actions">
+        <button type="button" class="ghost" :disabled="!hasPrev" @click="goPrev">Предыдущее</button>
+        <button type="button" :disabled="!hasNext" @click="goNext">Следующее</button>
+      </div>
     </div>
   </section>
 
