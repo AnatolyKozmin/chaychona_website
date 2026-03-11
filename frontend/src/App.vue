@@ -8,6 +8,7 @@ const router = useRouter();
 const route = useRoute();
 const mobileMenuOpen = ref(false);
 const usersDropdownOpen = ref(false);
+const checklistsDropdownOpen = ref(false);
 
 onMounted(async () => {
   if (auth.isAuthenticated) {
@@ -38,11 +39,16 @@ watch(
   () => {
     mobileMenuOpen.value = false;
     usersDropdownOpen.value = false;
+    checklistsDropdownOpen.value = false;
   }
 );
 
 const isUsersSection = computed(() =>
   route.path.startsWith("/users")
+);
+
+const isChecklistsSection = computed(() =>
+  route.path === "/my-checklists" || route.path === "/checklists"
 );
 </script>
 
@@ -62,12 +68,20 @@ const isUsersSection = computed(() =>
         <RouterLink to="/">Главная</RouterLink>
         <RouterLink to="/standards">Стандарты</RouterLink>
         <RouterLink to="/my-tests">Мои тесты</RouterLink>
-        <RouterLink to="/my-checklists">Чек-листы</RouterLink>
+        <div class="menu-dropdown">
+          <button type="button" class="menu-dropdown-trigger" :class="{ active: checklistsDropdownOpen || isChecklistsSection }" @click="checklistsDropdownOpen = !checklistsDropdownOpen">
+            Чек-листы ▾
+          </button>
+          <div v-show="checklistsDropdownOpen" class="menu-dropdown-panel">
+            <RouterLink to="/my-checklists" @click="checklistsDropdownOpen = false">Чек-листы</RouterLink>
+            <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/checklists" @click="checklistsDropdownOpen = false">Настройка чек-листов</RouterLink>
+            <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" :to="{ path: '/checklists', query: { tab: 'reports' } }" @click="checklistsDropdownOpen = false">Отчёты</RouterLink>
+          </div>
+        </div>
         <RouterLink to="/tasty-notebook">Вкусная тетрадь</RouterLink>
         <RouterLink v-if="!auth.isSuperadmin && !auth.isAdmin" to="/statistics">Статистика</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests">Тесты</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests-analytics">Аналитика</RouterLink>
-        <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/checklists">Чек-листы</RouterLink>
         <div v-if="auth.isAdmin || auth.isSuperadmin" class="menu-dropdown">
           <button type="button" class="menu-dropdown-trigger" :class="{ active: usersDropdownOpen || isUsersSection }" @click="usersDropdownOpen = !usersDropdownOpen">
             Пользователи ▾
@@ -91,11 +105,12 @@ const isUsersSection = computed(() =>
         <RouterLink to="/standards" @click="closeMobileMenu">Стандарты</RouterLink>
         <RouterLink to="/my-tests" @click="closeMobileMenu">Мои тесты</RouterLink>
         <RouterLink to="/my-checklists" @click="closeMobileMenu">Чек-листы</RouterLink>
+        <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/checklists" @click="closeMobileMenu">Настройка чек-листов</RouterLink>
+        <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" :to="{ path: '/checklists', query: { tab: 'reports' } }" @click="closeMobileMenu">Отчёты</RouterLink>
         <RouterLink to="/tasty-notebook" @click="closeMobileMenu">Вкусная тетрадь</RouterLink>
         <RouterLink v-if="!auth.isSuperadmin && !auth.isAdmin" to="/statistics" @click="closeMobileMenu">Статистика</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests" @click="closeMobileMenu">Тесты</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests-analytics" @click="closeMobileMenu">Аналитика</RouterLink>
-        <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/checklists" @click="closeMobileMenu">Чек-листы</RouterLink>
         <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/users/access" @click="closeMobileMenu">Доступы</RouterLink>
         <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/users/people" @click="closeMobileMenu">Список лиц</RouterLink>
         <button type="button" class="ghost mobile-logout" @click="handleLogout">Выйти</button>

@@ -255,7 +255,8 @@ async function loadCompletions() {
   error.value = "";
   try {
     const params: Record<string, string | number> = { limit: 100 };
-    if (completionFilter.value) params.checklist_id = completionFilter.value;
+    const cid = Number(completionFilter.value);
+    if (completionFilter.value && !Number.isNaN(cid)) params.checklist_id = cid;
     if (completionUserFilter.value) params.user_id = completionUserFilter.value;
     const { data } = await api.get<Completion[]>("/checklists/admin/completions", { params });
     completions.value = data;
