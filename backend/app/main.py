@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select, text, update
 
 from app.api.v1.auth import router as auth_router
+from app.api.v1.checklists import router as checklists_router
 from app.api.v1.courses import router as courses_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.menu import router as menu_router
@@ -18,9 +19,11 @@ from app.core.security import get_password_hash
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.menu import MenuCategory, MenuDish
+from app.models import checklist as _checklist_models  # noqa: F401
 from app.models import course as _course_models  # noqa: F401
 from app.models import menu as _menu_models  # noqa: F401
 from app.models import quiz as _quiz_models  # noqa: F401
+from app.models.checklist import ShiftType
 from app.models.user import RestaurantCatalog, Role, User
 
 settings = get_settings()
@@ -209,6 +212,12 @@ def _run_startup() -> None:
             .values(restaurant_id=chaihona.id)
         )
         db.commit()
+
+        # Seed shift types for checklists
+        if db.scalar(select(ShiftType).limit(1)) is None:
+            for name, order in [("Открытие смены", 0), ("Закрытие смены", 1)]:
+                db.add(ShiftType(name=name, is_active=True, sort_order=order))
+            db.commit()
     finally:
         db.close()
 
@@ -230,6 +239,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(checklists_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(menu_router, prefix="/api/v1")
 app.include_router(tests_router, prefix="/api/v1")

@@ -251,6 +251,21 @@ watch(
         <span class="learner-menu-arrow">→</span>
       </RouterLink>
 
+      <RouterLink to="/my-checklists" class="learner-menu-card learner-menu-card--checklists">
+        <div class="learner-menu-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+            <rect x="9" y="3" width="6" height="4" rx="2"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </div>
+        <div class="learner-menu-content">
+          <span class="learner-menu-title">Чек-листы</span>
+          <span class="learner-menu-desc">Открытие и закрытие смены</span>
+        </div>
+        <span class="learner-menu-arrow">→</span>
+      </RouterLink>
+
       <RouterLink to="/my-tests" class="learner-menu-card learner-menu-card--tests">
         <div class="learner-menu-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

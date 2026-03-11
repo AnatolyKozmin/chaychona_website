@@ -886,6 +886,16 @@ tr:hover td {
   background: #eef2ff;
 }
 
+.learner-menu-card--checklists .learner-menu-icon {
+  background: #cffafe;
+  color: #0e7490;
+}
+
+.learner-menu-card--checklists:hover {
+  border-color: #67e8f9;
+  background: #ecfeff;
+}
+
 .learner-menu-content {
   flex: 1;
   min-width: 0;
@@ -1470,6 +1480,156 @@ tr:hover td {
 .standards-test-link button {
   width: 100%;
   margin: 0;
+}
+
+/* Чек-листы — админ */
+.checklist-item-edit {
+  margin-bottom: 12px;
+}
+
+.checklist-item-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.checklist-item-input {
+  flex: 1;
+  min-width: 180px;
+}
+
+.checklist-item-photo-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.9rem;
+  color: #64748b;
+}
+
+/* Чек-листы — пользователь */
+.checklist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.checklist-card {
+  border: 1px solid #e5ebf6;
+  border-radius: 14px;
+  padding: 20px;
+  background: #fbfcff;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.checklist-card:hover {
+  border-color: #c5d4f0;
+  background: #f5f8ff;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.08);
+}
+
+.checklist-card-title {
+  margin: 0 0 6px 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.checklist-card-meta {
+  margin: 0 0 8px 0;
+  font-size: 0.85rem;
+}
+
+.checklist-card-items {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #64748b;
+}
+
+.checklist-fill-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.checklist-fill-header button {
+  flex-shrink: 0;
+  padding: 8px 12px;
+}
+
+.checklist-fill-items {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.checklist-fill-item {
+  border: 1px solid #e5ebf6;
+  border-radius: 12px;
+  padding: 16px;
+  background: #fbfcff;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.checklist-fill-item--checked {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.checklist-fill-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.checklist-fill-label input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: #22c55e;
+}
+
+.checklist-fill-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.checklist-fill-photo {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #e8eef6;
+}
+
+.checklist-fill-photo input[type="file"] {
+  margin-bottom: 8px;
+}
+
+.checklist-fill-preview {
+  width: 100%;
+  max-width: 200px;
+  border-radius: 10px;
+  border: 1px solid #e5ebf6;
+  display: block;
+  margin-top: 8px;
+}
+
+.checklist-fill-actions {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e8eef6;
+}
+
+.checklist-fill-actions button {
+  width: 100%;
+  margin: 0;
+  padding: 14px;
+  font-weight: 600;
 }
 
 /* Вкусная тетрадь — кнопки категорий */

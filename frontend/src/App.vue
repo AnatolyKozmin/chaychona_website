@@ -56,10 +56,12 @@ watch(
         <RouterLink to="/">Главная</RouterLink>
         <RouterLink to="/standards">Стандарты</RouterLink>
         <RouterLink to="/my-tests">Мои тесты</RouterLink>
+        <RouterLink to="/my-checklists">Чек-листы</RouterLink>
         <RouterLink to="/tasty-notebook">Вкусная тетрадь</RouterLink>
         <RouterLink v-if="!auth.isSuperadmin && !auth.isAdmin" to="/statistics">Статистика</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests">Тесты</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests-analytics">Аналитика</RouterLink>
+        <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/checklists">Чек-листы</RouterLink>
         <RouterLink v-if="auth.isAdmin" to="/users">Пользователи</RouterLink>
         <button type="button" class="ghost" @click="handleLogout">Выйти</button>
       </nav>
@@ -74,10 +76,12 @@ watch(
         <RouterLink to="/" @click="closeMobileMenu">Главная</RouterLink>
         <RouterLink to="/standards" @click="closeMobileMenu">Стандарты</RouterLink>
         <RouterLink to="/my-tests" @click="closeMobileMenu">Мои тесты</RouterLink>
+        <RouterLink to="/my-checklists" @click="closeMobileMenu">Чек-листы</RouterLink>
         <RouterLink to="/tasty-notebook" @click="closeMobileMenu">Вкусная тетрадь</RouterLink>
         <RouterLink v-if="!auth.isSuperadmin && !auth.isAdmin" to="/statistics" @click="closeMobileMenu">Статистика</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests" @click="closeMobileMenu">Тесты</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests-analytics" @click="closeMobileMenu">Аналитика</RouterLink>
+        <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/checklists" @click="closeMobileMenu">Чек-листы</RouterLink>
         <RouterLink v-if="auth.isAdmin" to="/users" @click="closeMobileMenu">Пользователи</RouterLink>
         <button type="button" class="ghost mobile-logout" @click="handleLogout">Выйти</button>
       </nav>

@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from "vue-router";
+import ChecklistsAdminView from "../views/ChecklistsAdminView.vue";
 import DashboardView from "../views/DashboardView.vue";
 import LoginView from "../views/LoginView.vue";
+import MyChecklistsView from "../views/MyChecklistsView.vue";
 import StatisticsView from "../views/StatisticsView.vue";
 import MyTestsView from "../views/MyTestsView.vue";
 import StandardsView from "../views/StandardsView.vue";
@@ -18,10 +20,12 @@ const router = createRouter({
     { path: "/standards", name: "standards", component: StandardsView },
     { path: "/standards/:id", name: "standards-study", component: StandardsStudyView },
     { path: "/my-tests", name: "my-tests", component: MyTestsView },
+    { path: "/my-checklists", name: "my-checklists", component: MyChecklistsView },
     { path: "/statistics", name: "statistics", component: StatisticsView },
     { path: "/tests-analytics", name: "tests-analytics", component: TestsAnalyticsView },
     { path: "/tasty-notebook", name: "tasty-notebook", component: TastyNotebookView },
     { path: "/tests", name: "tests", component: TestsAdminView },
+    { path: "/checklists", name: "checklists", component: ChecklistsAdminView },
     { path: "/users", name: "users", component: UsersView }
   ]
 });
