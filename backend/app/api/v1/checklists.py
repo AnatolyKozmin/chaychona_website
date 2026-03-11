@@ -240,6 +240,106 @@ def _build_checklist_admin_detail(db: Session, cl: Checklist) -> ChecklistAdminD
     )
 
 
+# --- Completions (admin reports) - must be before /admin/{checklist_id} ---
+
+
+@router.get("/admin/completions", response_model=list[ChecklistCompletionPublic])
+def list_completions_admin(
+    checklist_id: str | None = Query(default=None),
+    user_id: str | None = Query(default=None),
+    limit_raw: str | int | None = Query(default=100, alias="limit"),
+    _: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    checklist_id_int = _parse_optional_int(checklist_id)
+    limit_val = _parse_optional_int(limit_raw)
+    if limit_val is None or limit_val < 1:
+        limit_val = 100
+    limit_val = min(limit_val, 500)
+    query = (
+        select(ChecklistCompletion, Checklist, User)
+        .join(Checklist, ChecklistCompletion.checklist_id == Checklist.id)
+        .join(User, ChecklistCompletion.user_id == User.id)
+        .order_by(ChecklistCompletion.completed_at.desc())
+        .limit(limit_val)
+    )
+    if checklist_id_int is not None:
+        query = query.where(ChecklistCompletion.checklist_id == checklist_id_int)
+    if user_id is not None:
+        try:
+            user_uuid = UUID(user_id)
+            query = query.where(ChecklistCompletion.user_id == user_uuid)
+        except ValueError:
+            pass
+    rows = list(db.execute(query).all())
+
+    result: list[ChecklistCompletionPublic] = []
+    for comp, cl, user in rows:
+        comp_items = db.scalar(
+            select(func.count()).select_from(ChecklistItemCompletion).where(ChecklistItemCompletion.completion_id == comp.id)
+        ) or 0
+        result.append(
+            ChecklistCompletionPublic(
+                id=comp.id,
+                checklist_id=comp.checklist_id,
+                checklist_title=cl.title,
+                user_id=str(user.id),
+                user_name=user.full_name,
+                completed_at=comp.completed_at,
+                items_count=comp_items,
+            )
+        )
+    return result
+
+
+@router.get("/admin/completions/{completion_id}", response_model=ChecklistCompletionDetailPublic)
+def get_completion_admin(
+    completion_id: int,
+    _: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    comp = db.get(ChecklistCompletion, completion_id)
+    if not comp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Прохождение не найдено")
+
+    cl = db.get(Checklist, comp.checklist_id)
+    user = db.get(User, comp.user_id)
+    shift_type = db.get(ShiftType, cl.shift_type_id) if cl and cl.shift_type_id else None
+    if not cl or not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Данные не найдены")
+    item_completions = list(
+        db.execute(
+            select(ChecklistItemCompletion, ChecklistItem)
+            .join(ChecklistItem, ChecklistItemCompletion.checklist_item_id == ChecklistItem.id)
+            .where(ChecklistItemCompletion.completion_id == completion_id)
+            .order_by(ChecklistItem.sort_order.asc())
+        ).all()
+    )
+    return ChecklistCompletionDetailPublic(
+        id=comp.id,
+        checklist_id=comp.checklist_id,
+        checklist_title=cl.title,
+        shift_type_name=shift_type.name if shift_type else None,
+        user_id=str(user.id),
+        user_name=user.full_name,
+        user_email=user.email,
+        user_restaurant=user.restaurant,
+        user_job_title=user.job_title,
+        completed_at=comp.completed_at,
+        items_count=len(item_completions),
+        item_completions=[
+            ChecklistItemCompletionPublic(
+                checklist_item_id=item.id,
+                checklist_item_title=item.title,
+                requires_photo=item.requires_photo,
+                photo_path=ic.photo_path,
+                photo_url=_media_url(ic.photo_path),
+            )
+            for ic, item in item_completions
+        ],
+    )
+
+
 @router.get("/admin/{checklist_id}", response_model=ChecklistAdminDetailPublic)
 def get_checklist_admin(
     checklist_id: int,
@@ -306,108 +406,6 @@ def delete_checklist_admin(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Чек-лист не найден")
     db.delete(cl)
     db.commit()
-
-
-# --- Completions (admin reports) ---
-
-
-@router.get("/admin/completions", response_model=list[ChecklistCompletionPublic])
-def list_completions_admin(
-    checklist_id: str | None = Query(default=None),
-    user_id: str | None = Query(default=None),
-    limit_raw: str | int | None = Query(default=100, alias="limit"),
-    _: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN)),
-    db: Session = Depends(get_db),
-):
-    checklist_id_int = _parse_optional_int(checklist_id)
-    limit_val = _parse_optional_int(limit_raw)
-    if limit_val is None or limit_val < 1:
-        limit_val = 100
-    limit_val = min(limit_val, 500)
-    query = (
-        select(ChecklistCompletion, Checklist, User)
-        .join(Checklist, ChecklistCompletion.checklist_id == Checklist.id)
-        .join(User, ChecklistCompletion.user_id == User.id)
-        .order_by(ChecklistCompletion.completed_at.desc())
-        .limit(limit_val)
-    )
-    if checklist_id_int is not None:
-        query = query.where(ChecklistCompletion.checklist_id == checklist_id_int)
-    if user_id is not None:
-        try:
-            user_uuid = UUID(user_id)
-            query = query.where(ChecklistCompletion.user_id == user_uuid)
-        except ValueError:
-            pass
-    rows = list(db.execute(query).all())
-
-    result: list[ChecklistCompletionPublic] = []
-    for comp, cl, user in rows:
-        comp_items = db.scalar(
-            select(func.count()).select_from(ChecklistItemCompletion).where(ChecklistItemCompletion.completion_id == comp.id)
-        ) or 0
-        result.append(
-            ChecklistCompletionPublic(
-                id=comp.id,
-                checklist_id=comp.checklist_id,
-                checklist_title=cl.title,
-                user_id=str(user.id),
-                user_name=user.full_name,
-                completed_at=comp.completed_at,
-                items_count=comp_items,
-            )
-        )
-    return result
-
-
-@router.get("/admin/completions/{completion_id}", response_model=ChecklistCompletionDetailPublic)
-def get_completion_admin(
-    completion_id: int,
-    _: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN)),
-    db: Session = Depends(get_db),
-):
-    comp = db.get(ChecklistCompletion, completion_id)
-    if not comp:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Прохождение не найдено")
-
-    cl = db.get(Checklist, comp.checklist_id)
-    user = db.get(User, comp.user_id)
-    shift_type = db.get(ShiftType, cl.shift_type_id) if cl and cl.shift_type_id else None
-
-    item_completion_rows = list(
-        db.execute(
-            select(ChecklistItemCompletion, ChecklistItem)
-            .join(ChecklistItem, ChecklistItemCompletion.checklist_item_id == ChecklistItem.id)
-            .where(ChecklistItemCompletion.completion_id == comp.id)
-            .order_by(ChecklistItem.sort_order.asc())
-        ).all()
-    )
-
-    item_publics: list[ChecklistItemCompletionPublic] = []
-    for ic, item in item_completion_rows:
-        item_publics.append(
-            ChecklistItemCompletionPublic(
-                checklist_item_id=item.id,
-                checklist_item_title=item.title,
-                requires_photo=item.requires_photo,
-                photo_path=ic.photo_path,
-                photo_url=_media_url(ic.photo_path),
-            )
-        )
-
-    return ChecklistCompletionDetailPublic(
-        id=comp.id,
-        checklist_id=comp.checklist_id,
-        checklist_title=cl.title if cl else "",
-        shift_type_name=shift_type.name if shift_type else None,
-        user_id=str(user.id) if user else "",
-        user_name=user.full_name if user else "",
-        user_email=user.email if user else "",
-        user_restaurant=user.restaurant if user else None,
-        user_job_title=user.job_title if user else None,
-        completed_at=comp.completed_at,
-        item_completions=item_publics,
-    )
 
 
 # --- Checklists (learner) ---

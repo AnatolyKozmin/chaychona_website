@@ -769,6 +769,49 @@ tr:hover td {
   font-weight: 600;
 }
 
+.mobile-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mobile-nav-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: #334155;
+  font: inherit;
+  font-size: 1rem;
+  text-align: left;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.mobile-nav-trigger:hover,
+.mobile-nav-trigger.active {
+  background: #eef2ff;
+  color: #1d4ed8;
+}
+
+.mobile-nav-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 16px;
+  margin-bottom: 4px;
+}
+
+.mobile-nav-sub a {
+  padding: 8px 12px;
+  font-size: 0.95rem;
+}
+
 .mobile-logout {
   margin-top: 8px;
 }

@@ -7,6 +7,8 @@ const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 const mobileMenuOpen = ref(false);
+const mobileChecklistsExpanded = ref(false);
+const mobileUsersExpanded = ref(false);
 const usersDropdownOpen = ref(false);
 const checklistsDropdownOpen = ref(false);
 const checklistsDropdownRef = ref<HTMLElement | null>(null);
@@ -30,10 +32,14 @@ function handleLogout() {
 
 function openMobileMenu() {
   mobileMenuOpen.value = true;
+  if (isChecklistsSection.value) mobileChecklistsExpanded.value = true;
+  if (isUsersSection.value) mobileUsersExpanded.value = true;
 }
 
 function closeMobileMenu() {
   mobileMenuOpen.value = false;
+  mobileChecklistsExpanded.value = false;
+  mobileUsersExpanded.value = false;
 }
 
 watch(
@@ -42,6 +48,8 @@ watch(
     mobileMenuOpen.value = false;
     usersDropdownOpen.value = false;
     checklistsDropdownOpen.value = false;
+    mobileChecklistsExpanded.value = false;
+    mobileUsersExpanded.value = false;
   }
 );
 
@@ -126,15 +134,46 @@ onUnmounted(() => {
         <RouterLink to="/" @click="closeMobileMenu">Главная</RouterLink>
         <RouterLink to="/standards" @click="closeMobileMenu">Стандарты</RouterLink>
         <RouterLink to="/my-tests" @click="closeMobileMenu">Мои тесты</RouterLink>
-        <RouterLink to="/my-checklists" @click="closeMobileMenu">Чек-листы</RouterLink>
-        <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/checklists" @click="closeMobileMenu">Настройка чек-листов</RouterLink>
-        <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" :to="{ path: '/checklists', query: { tab: 'reports' } }" @click="closeMobileMenu">Отчёты</RouterLink>
+
+        <template v-if="!auth.isAdmin && !auth.isSuperadmin">
+          <RouterLink to="/my-checklists" @click="closeMobileMenu">Чек-листы</RouterLink>
+        </template>
+        <div v-else class="mobile-nav-group">
+          <button
+            type="button"
+            class="mobile-nav-trigger"
+            :class="{ active: mobileChecklistsExpanded || isChecklistsSection }"
+            @click="mobileChecklistsExpanded = !mobileChecklistsExpanded"
+          >
+            Чек-листы {{ mobileChecklistsExpanded ? "▴" : "▾" }}
+          </button>
+          <div v-show="mobileChecklistsExpanded" class="mobile-nav-sub">
+            <RouterLink to="/my-checklists" @click="closeMobileMenu">Чек-листы</RouterLink>
+            <RouterLink to="/checklists" @click="closeMobileMenu">Настройка чек-листов</RouterLink>
+            <RouterLink :to="{ path: '/checklists', query: { tab: 'reports' } }" @click="closeMobileMenu">Отчёты</RouterLink>
+          </div>
+        </div>
+
         <RouterLink to="/tasty-notebook" @click="closeMobileMenu">Вкусная тетрадь</RouterLink>
         <RouterLink v-if="!auth.isSuperadmin && !auth.isAdmin" to="/statistics" @click="closeMobileMenu">Статистика</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests" @click="closeMobileMenu">Тесты</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests-analytics" @click="closeMobileMenu">Аналитика</RouterLink>
-        <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/users/access" @click="closeMobileMenu">Доступы</RouterLink>
-        <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/users/people" @click="closeMobileMenu">Список лиц</RouterLink>
+
+        <div v-if="auth.isAdmin || auth.isSuperadmin" class="mobile-nav-group">
+          <button
+            type="button"
+            class="mobile-nav-trigger"
+            :class="{ active: mobileUsersExpanded || isUsersSection }"
+            @click="mobileUsersExpanded = !mobileUsersExpanded"
+          >
+            Пользователи {{ mobileUsersExpanded ? "▴" : "▾" }}
+          </button>
+          <div v-show="mobileUsersExpanded" class="mobile-nav-sub">
+            <RouterLink to="/users/access" @click="closeMobileMenu">Доступы</RouterLink>
+            <RouterLink to="/users/people" @click="closeMobileMenu">Список лиц</RouterLink>
+          </div>
+        </div>
+
         <button type="button" class="ghost mobile-logout" @click="handleLogout">Выйти</button>
       </nav>
     </aside>
