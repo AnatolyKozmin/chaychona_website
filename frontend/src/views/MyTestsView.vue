@@ -342,14 +342,29 @@ useBodyScrollLock(computed(() => attemptsModalOpen.value));
           <p v-if="result.duration_seconds !== null"><strong>Время прохождения:</strong> {{ result.duration_seconds }} сек.</p>
         </div>
 
-        <div class="test-result-card" v-for="item in result.results" :key="item.question_id">
-          <p class="long-text" style="margin-top: 0"><strong>{{ item.question_text }}</strong></p>
-          <p>
-            <strong>Статус:</strong>
-            <span :class="item.is_correct ? 'muted' : 'error'">{{ item.is_correct ? "Верно" : "Неверно" }}</span>
-          </p>
-          <p><strong>Ваш ответ:</strong> {{ item.selected_options.join(", ") || "Не выбран" }}</p>
-          <p><strong>Правильный ответ:</strong> {{ item.correct_options.join(", ") }}</p>
+        <div
+          v-for="item in result.results"
+          :key="item.question_id"
+          class="test-result-card"
+          :class="item.is_correct ? 'test-result-card--correct' : 'test-result-card--incorrect'"
+        >
+          <div class="test-result-icon" :class="item.is_correct ? 'test-result-icon--correct' : 'test-result-icon--incorrect'">
+            <span v-if="item.is_correct">✓</span>
+            <span v-else>✗</span>
+          </div>
+          <p class="test-result-question long-text">{{ item.question_text }}</p>
+          <div class="test-result-answers">
+            <p class="test-result-row">
+              <span class="test-result-label">Ваш ответ:</span>
+              <span :class="item.is_correct ? 'test-result-value--correct' : 'test-result-value--incorrect'">
+                {{ item.selected_options.join(", ") || "Не выбран" }}
+              </span>
+            </p>
+            <p v-if="!item.is_correct" class="test-result-row">
+              <span class="test-result-label">Правильный:</span>
+              <span class="test-result-value--correct">{{ item.correct_options.join(", ") }}</span>
+            </p>
+          </div>
         </div>
       </template>
     </div>
@@ -406,16 +421,29 @@ useBodyScrollLock(computed(() => attemptsModalOpen.value));
       </div>
 
       <div class="attempt-result-list" style="margin-top: 10px">
-        <div class="clean-item" v-for="item in selectedAttemptDetail.results" :key="item.question_id">
-          <div class="actions-row">
-            <strong class="long-text" style="margin: 0">{{ item.question_text }}</strong>
-            <span class="result-pill" :class="item.is_correct ? 'result-pill-success' : 'result-pill-error'">
-              {{ item.is_correct ? "Верно" : "Неверно" }}
-            </span>
+        <div
+          v-for="item in selectedAttemptDetail.results"
+          :key="item.question_id"
+          class="test-result-card"
+          :class="item.is_correct ? 'test-result-card--correct' : 'test-result-card--incorrect'"
+        >
+          <div class="test-result-icon" :class="item.is_correct ? 'test-result-icon--correct' : 'test-result-icon--incorrect'">
+            <span v-if="item.is_correct">✓</span>
+            <span v-else>✗</span>
           </div>
-          <hr class="result-divider" />
-          <p><strong>Ваш ответ:</strong> {{ item.selected_options.join(", ") || "Не выбран" }}</p>
-          <p><strong>Правильный ответ:</strong> {{ item.correct_options.join(", ") }}</p>
+          <p class="test-result-question long-text">{{ item.question_text }}</p>
+          <div class="test-result-answers">
+            <p class="test-result-row">
+              <span class="test-result-label">Ваш ответ:</span>
+              <span :class="item.is_correct ? 'test-result-value--correct' : 'test-result-value--incorrect'">
+                {{ item.selected_options.join(", ") || "Не выбран" }}
+              </span>
+            </p>
+            <p v-if="!item.is_correct" class="test-result-row">
+              <span class="test-result-label">Правильный:</span>
+              <span class="test-result-value--correct">{{ item.correct_options.join(", ") }}</span>
+            </p>
+          </div>
         </div>
       </div>
       </div>

@@ -229,17 +229,32 @@ onMounted(async () => {
                   <td colspan="5">
                     <div class="clean-item">
                       <p v-if="!attemptDetails[item.id]" class="muted">Загрузка деталей...</p>
-                      <template v-else>
-                        <div v-for="res in attemptDetails[item.id].results" :key="res.question_id" class="clean-item" style="margin-bottom: 8px">
-                          <p style="margin-top: 0"><strong>{{ res.question_text }}</strong></p>
-                          <p><strong>Ваш ответ:</strong> {{ res.selected_options.join(", ") || "Не выбран" }}</p>
-                          <p><strong>Правильный:</strong> {{ res.correct_options.join(", ") || "—" }}</p>
-                          <p>
-                            <strong>Статус:</strong>
-                            <span :class="res.is_correct ? 'muted' : 'error'">{{ res.is_correct ? "Верно" : "Неверно" }}</span>
-                          </p>
+                      <div v-else class="attempt-result-list">
+                        <div
+                          v-for="res in attemptDetails[item.id].results"
+                          :key="res.question_id"
+                          class="test-result-card"
+                          :class="res.is_correct ? 'test-result-card--correct' : 'test-result-card--incorrect'"
+                        >
+                          <div class="test-result-icon" :class="res.is_correct ? 'test-result-icon--correct' : 'test-result-icon--incorrect'">
+                            <span v-if="res.is_correct">✓</span>
+                            <span v-else>✗</span>
+                          </div>
+                          <p class="test-result-question long-text">{{ res.question_text }}</p>
+                          <div class="test-result-answers">
+                            <p class="test-result-row">
+                              <span class="test-result-label">Ваш ответ:</span>
+                              <span :class="res.is_correct ? 'test-result-value--correct' : 'test-result-value--incorrect'">
+                                {{ res.selected_options.join(", ") || "Не выбран" }}
+                              </span>
+                            </p>
+                            <p v-if="!res.is_correct" class="test-result-row">
+                              <span class="test-result-label">Правильный:</span>
+                              <span class="test-result-value--correct">{{ res.correct_options.join(", ") || "—" }}</span>
+                            </p>
+                          </div>
                         </div>
-                      </template>
+                      </div>
                     </div>
                   </td>
                 </tr>

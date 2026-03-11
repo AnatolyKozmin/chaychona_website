@@ -1065,7 +1065,6 @@ tr:hover td {
 
 .test-question-card,
 .test-summary-card,
-.test-result-card,
 .attempt-card {
   border: 0;
   border-radius: 0;
@@ -1074,6 +1073,93 @@ tr:hover td {
   box-shadow: none;
   border-bottom: 1px solid #edf1f7;
   margin-top: 10px;
+}
+
+/* Разбор тестов — карточки вопросов */
+.test-result-card {
+  position: relative;
+  padding: 16px 48px 16px 18px;
+  border-radius: 12px;
+  margin-top: 12px;
+  border: 1px solid transparent;
+  transition: box-shadow 0.2s ease;
+}
+
+.test-result-card--correct {
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  border-color: #86efac;
+}
+
+.test-result-card--correct:hover {
+  box-shadow: 0 2px 12px rgba(34, 197, 94, 0.15);
+}
+
+.test-result-card--incorrect {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border-color: #fca5a5;
+}
+
+.test-result-card--incorrect:hover {
+  box-shadow: 0 2px 12px rgba(239, 68, 68, 0.12);
+}
+
+.test-result-icon {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.test-result-icon--correct {
+  background: #22c55e;
+  color: #fff;
+}
+
+.test-result-icon--incorrect {
+  background: #ef4444;
+  color: #fff;
+}
+
+.test-result-question {
+  margin: 0 0 12px 0;
+  font-weight: 600;
+  font-size: 1rem;
+  color: #1e293b;
+  line-height: 1.4;
+}
+
+.test-result-answers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.test-result-row {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.test-result-label {
+  color: #64748b;
+  margin-right: 6px;
+}
+
+.test-result-value--correct {
+  color: #166534;
+  font-weight: 600;
+}
+
+.test-result-value--incorrect {
+  color: #991b1b;
+  font-weight: 600;
 }
 
 .tests-page .answer-option {
