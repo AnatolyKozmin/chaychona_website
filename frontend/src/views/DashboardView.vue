@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 
@@ -91,6 +91,13 @@ async function loadOverview() {
 onMounted(async () => {
   await loadOverview();
 });
+
+watch(
+  () => auth.user?.role,
+  () => {
+    loadOverview();
+  }
+);
 </script>
 
 <template>
@@ -206,9 +213,9 @@ onMounted(async () => {
     </template>
   </section>
 
-  <hr v-else-if="isLearner" class="section-divider" />
-
-  <section v-else-if="isLearner" class="card learner-dashboard">
+  <template v-else>
+    <hr class="section-divider" />
+    <section class="card learner-dashboard">
     <div v-if="learnerOverview && !loading" class="learner-progress-preview">
       <div class="progress-preview-item">
         <span class="progress-preview-value">{{ learnerOverview.completed_trainings }} из {{ learnerOverview.total_trainings }}</span>
@@ -286,5 +293,6 @@ onMounted(async () => {
         <span class="learner-menu-arrow">→</span>
       </RouterLink>
     </div>
-  </section>
+    </section>
+  </template>
 </template>
