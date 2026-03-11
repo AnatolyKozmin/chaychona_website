@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "./stores/auth";
 
@@ -7,6 +7,7 @@ const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 const mobileMenuOpen = ref(false);
+const usersDropdownOpen = ref(false);
 
 onMounted(async () => {
   if (auth.isAuthenticated) {
@@ -36,7 +37,12 @@ watch(
   () => route.fullPath,
   () => {
     mobileMenuOpen.value = false;
+    usersDropdownOpen.value = false;
   }
+);
+
+const isUsersSection = computed(() =>
+  route.path.startsWith("/users")
 );
 </script>
 
@@ -62,7 +68,15 @@ watch(
         <RouterLink v-if="auth.isSuperadmin" to="/tests">Тесты</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests-analytics">Аналитика</RouterLink>
         <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/checklists">Чек-листы</RouterLink>
-        <RouterLink v-if="auth.isAdmin" to="/users">Пользователи</RouterLink>
+        <div v-if="auth.isAdmin || auth.isSuperadmin" class="menu-dropdown">
+          <button type="button" class="menu-dropdown-trigger" :class="{ active: usersDropdownOpen || isUsersSection }" @click="usersDropdownOpen = !usersDropdownOpen">
+            Пользователи ▾
+          </button>
+          <div v-show="usersDropdownOpen" class="menu-dropdown-panel">
+            <RouterLink to="/users/access" @click="usersDropdownOpen = false">Доступы</RouterLink>
+            <RouterLink to="/users/people" @click="usersDropdownOpen = false">Список лиц</RouterLink>
+          </div>
+        </div>
         <button type="button" class="ghost" @click="handleLogout">Выйти</button>
       </nav>
     </header>
@@ -82,7 +96,8 @@ watch(
         <RouterLink v-if="auth.isSuperadmin" to="/tests" @click="closeMobileMenu">Тесты</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests-analytics" @click="closeMobileMenu">Аналитика</RouterLink>
         <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/checklists" @click="closeMobileMenu">Чек-листы</RouterLink>
-        <RouterLink v-if="auth.isAdmin" to="/users" @click="closeMobileMenu">Пользователи</RouterLink>
+        <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/users/access" @click="closeMobileMenu">Доступы</RouterLink>
+        <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/users/people" @click="closeMobileMenu">Список лиц</RouterLink>
         <button type="button" class="ghost mobile-logout" @click="handleLogout">Выйти</button>
       </nav>
     </aside>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useRoute } from "vue-router";
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 
@@ -68,6 +69,7 @@ interface AttemptDetail {
   }>;
 }
 
+const route = useRoute();
 const auth = useAuthStore();
 const loading = ref(false);
 const error = ref("");
@@ -129,7 +131,7 @@ async function loadAnalytics() {
     analytics.value = data;
     filterRestaurant.value = "";
     filterRole.value = "";
-    filterUser.value = "";
+    filterUser.value = (route.query.user as string) || "";
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "Не удалось загрузить аналитику";
   } finally {

@@ -1,6 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.user import RegistrationRequestStatus, Role
@@ -82,3 +83,26 @@ class RestaurantWithRolesPublic(BaseModel):
     id: UUID
     name: str
     roles: list[CatalogItemPublic]
+
+
+class UserAttemptPublic(BaseModel):
+    id: int
+    test_id: int
+    test_title: str
+    finished_at: datetime
+    total_questions: int
+    correct_answers: int
+    score_percent: float
+
+
+class UserChecklistCompletionPublic(BaseModel):
+    id: int
+    checklist_id: int
+    checklist_title: str
+    completed_at: datetime
+    items_count: int
+
+
+class UserActivityPublic(BaseModel):
+    attempts: list[UserAttemptPublic]
+    checklist_completions: list[UserChecklistCompletionPublic]

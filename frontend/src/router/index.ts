@@ -10,7 +10,8 @@ import StandardsStudyView from "../views/StandardsStudyView.vue";
 import TestsAnalyticsView from "../views/TestsAnalyticsView.vue";
 import TastyNotebookView from "../views/TastyNotebookView.vue";
 import TestsAdminView from "../views/TestsAdminView.vue";
-import UsersView from "../views/UsersView.vue";
+import UsersAccessView from "../views/UsersAccessView.vue";
+import UsersPeopleView from "../views/UsersPeopleView.vue";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -26,7 +27,9 @@ const router = createRouter({
     { path: "/tasty-notebook", name: "tasty-notebook", component: TastyNotebookView },
     { path: "/tests", name: "tests", component: TestsAdminView },
     { path: "/checklists", name: "checklists", component: ChecklistsAdminView },
-    { path: "/users", name: "users", component: UsersView }
+    { path: "/users", redirect: { name: "users-access" } },
+    { path: "/users/access", name: "users-access", component: UsersAccessView },
+    { path: "/users/people", name: "users-people", component: UsersPeopleView }
   ]
 });
 

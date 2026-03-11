@@ -100,3 +100,17 @@ class ChecklistItemCompletionPublic(BaseModel):
     requires_photo: bool
     photo_path: str | None
     photo_url: str | None
+
+
+class ChecklistCompletionDetailPublic(BaseModel):
+    id: int
+    checklist_id: int
+    checklist_title: str
+    shift_type_name: str | None
+    user_id: str
+    user_name: str
+    user_email: str
+    user_restaurant: str | None
+    user_job_title: str | None
+    completed_at: datetime
+    item_completions: list[ChecklistItemCompletionPublic]

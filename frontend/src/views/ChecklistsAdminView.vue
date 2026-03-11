@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 
@@ -39,6 +40,39 @@ interface RestaurantWithRoles {
   roles: { id: string; name: string }[];
 }
 
+interface CompletionItem {
+  checklist_item_id: number;
+  checklist_item_title: string;
+  requires_photo: boolean;
+  photo_path: string | null;
+  photo_url: string | null;
+}
+
+interface Completion {
+  id: number;
+  checklist_id: number;
+  checklist_title: string;
+  user_id: string;
+  user_name: string;
+  completed_at: string;
+  items_count: number;
+}
+
+interface UserOption {
+  id: string;
+  full_name: string;
+  email: string;
+}
+
+interface CompletionDetail extends Completion {
+  shift_type_name: string | null;
+  user_email: string;
+  user_restaurant: string | null;
+  user_job_title: string | null;
+  item_completions: CompletionItem[];
+}
+
+const route = useRoute();
 const auth = useAuthStore();
 const loading = ref(false);
 const saving = ref(false);
@@ -48,6 +82,14 @@ const shiftTypes = ref<ShiftType[]>([]);
 const checklists = ref<ChecklistAdmin[]>([]);
 const restaurantsWithRoles = ref<RestaurantWithRoles[]>([]);
 const editingId = ref<number | null>(null);
+const adminTab = ref<"checklists" | "reports">("checklists");
+const completions = ref<Completion[]>([]);
+const completionsLoading = ref(false);
+const completionFilter = ref("");
+const completionUserFilter = ref("");
+const reportUsers = ref<UserOption[]>([]);
+const selectedCompletion = ref<CompletionDetail | null>(null);
+const completionDetailLoading = ref(false);
 const form = reactive({
   title: "",
   shift_type_id: "" as string | number,
@@ -199,10 +241,80 @@ async function deleteChecklist(id: number) {
   }
 }
 
+async function loadReportUsers() {
+  try {
+    const { data } = await api.get<UserOption[]>("/users");
+    reportUsers.value = data;
+  } catch {
+    reportUsers.value = [];
+  }
+}
+
+async function loadCompletions() {
+  completionsLoading.value = true;
+  error.value = "";
+  try {
+    const params: Record<string, string | number> = { limit: 100 };
+    if (completionFilter.value) params.checklist_id = completionFilter.value;
+    if (completionUserFilter.value) params.user_id = completionUserFilter.value;
+    const { data } = await api.get<Completion[]>("/checklists/admin/completions", { params });
+    completions.value = data;
+  } catch (e: any) {
+    error.value = extractError(e, "Не удалось загрузить отчёты");
+  } finally {
+    completionsLoading.value = false;
+  }
+}
+
+async function openCompletionDetail(id: number) {
+  completionDetailLoading.value = true;
+  selectedCompletion.value = null;
+  try {
+    const { data } = await api.get<CompletionDetail>(`/checklists/admin/completions/${id}`);
+    selectedCompletion.value = data;
+  } catch (e: any) {
+    error.value = extractError(e, "Не удалось загрузить детали");
+  } finally {
+    completionDetailLoading.value = false;
+  }
+}
+
+function closeCompletionModal() {
+  selectedCompletion.value = null;
+}
+
+function toMediaUrl(path: string | null): string | null {
+  if (!path) return null;
+  const base = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
+  const origin = new URL(base).origin;
+  return `${origin}/api/v1/menu/media?path=${encodeURIComponent(path)}`;
+}
+
+watch(
+  () => route.query.tab,
+  (tab) => {
+    if (tab === "reports") {
+      adminTab.value = "reports";
+      loadReportUsers();
+      loadCompletions();
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => route.query.user_id,
+  (id) => {
+    if (id) completionUserFilter.value = id;
+  },
+  { immediate: true }
+);
+
 onMounted(async () => {
   await loadShiftTypes();
   await loadRestaurants();
   await loadChecklists();
+  await loadCompletions();
   updateAvailableRoles();
 });
 </script>
@@ -217,7 +329,16 @@ onMounted(async () => {
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="success" class="success">{{ success }}</p>
 
-    <div class="card">
+    <div class="tests-tabs">
+      <button type="button" class="tests-tab" :class="{ active: adminTab === 'checklists' }" @click="adminTab = 'checklists'">
+        Чек-листы
+      </button>
+      <button type="button" class="tests-tab" :class="{ active: adminTab === 'reports' }" @click="adminTab = 'reports'; loadCompletions()">
+        Отчёты
+      </button>
+    </div>
+
+    <div v-show="adminTab === 'checklists'" class="card">
       <h3 style="margin: 0">{{ editingId ? "Редактирование" : "Новый чек-лист" }}</h3>
       <form @submit.prevent="saveChecklist">
         <label>Название</label>
@@ -275,7 +396,7 @@ onMounted(async () => {
       </form>
     </div>
 
-    <div class="table-wrap" style="margin-top: 20px">
+    <div v-show="adminTab === 'checklists'" class="table-wrap" style="margin-top: 20px">
       <table>
         <thead>
           <tr>
@@ -300,5 +421,89 @@ onMounted(async () => {
         </tbody>
       </table>
     </div>
+
+    <div v-show="adminTab === 'reports'">
+      <div class="menu-toolbar" style="margin-bottom: 14px">
+        <div class="menu-toolbar-filters">
+          <div class="filter-row">
+            <label class="filter-label">Чек-лист</label>
+            <select v-model="completionFilter" class="filter-select" @change="loadCompletions">
+              <option value="">Все</option>
+              <option v-for="cl in checklists" :key="cl.id" :value="String(cl.id)">{{ cl.title }}</option>
+            </select>
+          </div>
+          <div class="filter-row">
+            <label class="filter-label">Сотрудник</label>
+            <select v-model="completionUserFilter" class="filter-select" @change="loadCompletions">
+              <option value="">Все</option>
+              <option v-for="u in reportUsers" :key="u.id" :value="u.id">{{ u.full_name }}</option>
+            </select>
+          </div>
+        </div>
+        <button type="button" class="ghost" @click="loadCompletions">Обновить</button>
+      </div>
+      <p v-if="completionsLoading">Загрузка...</p>
+      <p v-else-if="completions.length === 0" class="muted">Прохождений пока нет.</p>
+      <div v-else class="attempt-result-list">
+        <div v-for="c in completions" :key="c.id" class="test-result-card test-result-card--correct">
+          <div class="actions-row" style="flex-wrap: wrap; gap: 8px">
+            <div>
+              <strong>{{ c.checklist_title }}</strong>
+              <p class="muted" style="margin: 4px 0 0 0">{{ c.user_name }}</p>
+              <p class="muted" style="margin: 2px 0 0 0; font-size: 12px">
+                {{ new Date(c.completed_at).toLocaleString("ru-RU") }} · {{ c.items_count }} пунктов
+              </p>
+            </div>
+            <button type="button" class="ghost" @click="openCompletionDetail(c.id)">Подробнее</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </section>
+
+  <Transition name="fade-scale">
+    <div v-if="selectedCompletion !== null" class="modal-backdrop" @click.self="closeCompletionModal">
+      <div class="modal-window modal-window-wide">
+        <div class="actions-row">
+          <h3 style="margin: 0">Отчёт по чек-листу</h3>
+          <button type="button" class="ghost" @click="closeCompletionModal">Закрыть</button>
+        </div>
+        <p v-if="completionDetailLoading">Загрузка...</p>
+        <template v-else>
+          <div class="attempt-header-grid">
+            <div class="clean-item">
+              <strong>Чек-лист</strong>
+              <p style="margin: 6px 0 0 0">{{ selectedCompletion.checklist_title }}</p>
+              <p v-if="selectedCompletion.shift_type_name" class="muted" style="margin: 2px 0 0 0">{{ selectedCompletion.shift_type_name }}</p>
+            </div>
+            <div class="clean-item">
+              <strong>Сотрудник</strong>
+              <p style="margin: 6px 0 0 0">{{ selectedCompletion.user_name }}</p>
+              <p class="muted" style="margin: 2px 0 0 0; font-size: 12px">{{ selectedCompletion.user_email }}</p>
+              <p v-if="selectedCompletion.user_restaurant" class="muted" style="margin: 2px 0 0 0">{{ selectedCompletion.user_restaurant }}</p>
+              <p v-if="selectedCompletion.user_job_title" class="muted" style="margin: 2px 0 0 0">{{ selectedCompletion.user_job_title }}</p>
+            </div>
+            <div class="clean-item">
+              <strong>Дата и время</strong>
+              <p style="margin: 6px 0 0 0">{{ new Date(selectedCompletion.completed_at).toLocaleString("ru-RU") }}</p>
+            </div>
+          </div>
+          <hr class="card-divider" />
+          <h4 style="margin: 0 0 12px 0">Пункты</h4>
+          <div class="attempt-result-list">
+            <div v-for="ic in selectedCompletion.item_completions" :key="ic.checklist_item_id" class="test-result-card test-result-card--correct">
+              <p class="test-result-question">{{ ic.checklist_item_title }}</p>
+              <img
+                v-if="ic.photo_path"
+                :src="toMediaUrl(ic.photo_path) || undefined"
+                alt=""
+                class="checklist-fill-preview"
+                style="margin-top: 10px; max-width: 300px"
+              />
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </Transition>
 </template>

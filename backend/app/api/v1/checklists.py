@@ -2,7 +2,7 @@ import uuid
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -19,8 +19,11 @@ from app.models.user import JobTitleCatalog, RestaurantCatalog, Role, User
 from app.schemas.checklist import (
     ChecklistAdminDetailPublic,
     ChecklistAdminPublic,
+    ChecklistCompletionDetailPublic,
+    ChecklistCompletionPublic,
     ChecklistCompletionSubmit,
     ChecklistCreate,
+    ChecklistItemCompletionPublic,
     ChecklistItemPublic,
     ChecklistLearnerPublic,
     ChecklistUpdate,
@@ -288,6 +291,103 @@ def delete_checklist_admin(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Чек-лист не найден")
     db.delete(cl)
     db.commit()
+
+
+# --- Completions (admin reports) ---
+
+
+@router.get("/admin/completions", response_model=list[ChecklistCompletionPublic])
+def list_completions_admin(
+    checklist_id: int | None = Query(default=None),
+    user_id: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    _: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    query = (
+        select(ChecklistCompletion, Checklist, User)
+        .join(Checklist, ChecklistCompletion.checklist_id == Checklist.id)
+        .join(User, ChecklistCompletion.user_id == User.id)
+        .order_by(ChecklistCompletion.completed_at.desc())
+        .limit(limit)
+    )
+    if checklist_id is not None:
+        query = query.where(ChecklistCompletion.checklist_id == checklist_id)
+    if user_id is not None:
+        try:
+            user_uuid = UUID(user_id)
+            query = query.where(ChecklistCompletion.user_id == user_uuid)
+        except ValueError:
+            pass
+    rows = list(db.execute(query).all())
+
+    result: list[ChecklistCompletionPublic] = []
+    for comp, cl, user in rows:
+        comp_items = db.scalar(
+            select(func.count()).select_from(ChecklistItemCompletion).where(ChecklistItemCompletion.completion_id == comp.id)
+        ) or 0
+        result.append(
+            ChecklistCompletionPublic(
+                id=comp.id,
+                checklist_id=comp.checklist_id,
+                checklist_title=cl.title,
+                user_id=str(user.id),
+                user_name=user.full_name,
+                completed_at=comp.completed_at,
+                items_count=comp_items,
+            )
+        )
+    return result
+
+
+@router.get("/admin/completions/{completion_id}", response_model=ChecklistCompletionDetailPublic)
+def get_completion_admin(
+    completion_id: int,
+    _: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    comp = db.get(ChecklistCompletion, completion_id)
+    if not comp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Прохождение не найдено")
+
+    cl = db.get(Checklist, comp.checklist_id)
+    user = db.get(User, comp.user_id)
+    shift_type = db.get(ShiftType, cl.shift_type_id) if cl and cl.shift_type_id else None
+
+    item_completion_rows = list(
+        db.execute(
+            select(ChecklistItemCompletion, ChecklistItem)
+            .join(ChecklistItem, ChecklistItemCompletion.checklist_item_id == ChecklistItem.id)
+            .where(ChecklistItemCompletion.completion_id == comp.id)
+            .order_by(ChecklistItem.sort_order.asc())
+        ).all()
+    )
+
+    item_publics: list[ChecklistItemCompletionPublic] = []
+    for ic, item in item_completion_rows:
+        item_publics.append(
+            ChecklistItemCompletionPublic(
+                checklist_item_id=item.id,
+                checklist_item_title=item.title,
+                requires_photo=item.requires_photo,
+                photo_path=ic.photo_path,
+                photo_url=_media_url(ic.photo_path),
+            )
+        )
+
+    return ChecklistCompletionDetailPublic(
+        id=comp.id,
+        checklist_id=comp.checklist_id,
+        checklist_title=cl.title if cl else "",
+        shift_type_name=shift_type.name if shift_type else None,
+        user_id=str(user.id) if user else "",
+        user_name=user.full_name if user else "",
+        user_email=user.email if user else "",
+        user_restaurant=user.restaurant if user else None,
+        user_job_title=user.job_title if user else None,
+        completed_at=comp.completed_at,
+        item_completions=item_publics,
+    )
 
 
 # --- Checklists (learner) ---

@@ -1,11 +1,13 @@
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
+from app.models.checklist import Checklist, ChecklistCompletion, ChecklistItem
+from app.models.quiz import QuizAttempt, QuizTest
 from app.core.security import get_password_hash
 from app.db.session import get_db
 from app.models.user import (
@@ -27,6 +29,9 @@ from app.schemas.user import (
     SetLearnerProfileRequest,
     SetJobTitleRequest,
     SetRoleRequest,
+    UserActivityPublic,
+    UserAttemptPublic,
+    UserChecklistCompletionPublic,
     UserPublic,
 )
 
@@ -61,6 +66,67 @@ def list_users(
     db: Session = Depends(get_db),
 ):
     return list(db.scalars(select(User).order_by(User.created_at.desc())).all())
+
+
+@router.get("/{user_id}/activity", response_model=UserActivityPublic)
+def get_user_activity(
+    user_id: UUID,
+    _: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+
+    attempts = list(
+        db.scalars(
+            select(QuizAttempt)
+            .where(QuizAttempt.user_id == user_id)
+            .order_by(QuizAttempt.finished_at.desc())
+        ).all()
+    )
+    tests = {t.id: t for t in db.scalars(select(QuizTest).where(QuizTest.id.in_({a.test_id for a in attempts}))).all()}
+
+    attempt_publics: list[UserAttemptPublic] = []
+    for a in attempts:
+        test = tests.get(a.test_id)
+        score = (a.correct_answers / a.total_questions * 100) if a.total_questions else 0.0
+        attempt_publics.append(
+            UserAttemptPublic(
+                id=a.id,
+                test_id=a.test_id,
+                test_title=test.title if test else "",
+                finished_at=a.finished_at,
+                total_questions=a.total_questions,
+                correct_answers=a.correct_answers,
+                score_percent=round(score, 1),
+            )
+        )
+
+    completion_rows = list(
+        db.execute(
+            select(ChecklistCompletion, Checklist)
+            .join(Checklist, ChecklistCompletion.checklist_id == Checklist.id)
+            .where(ChecklistCompletion.user_id == user_id)
+            .order_by(ChecklistCompletion.completed_at.desc())
+        ).all()
+    )
+    completion_publics: list[UserChecklistCompletionPublic] = []
+    for comp, cl in completion_rows:
+        items_count = db.scalar(
+            select(func.count()).select_from(ChecklistItem).where(ChecklistItem.checklist_id == cl.id)
+        ) or 0
+        completion_publics.append(
+            UserChecklistCompletionPublic(
+                id=comp.id,
+                checklist_id=comp.checklist_id,
+                checklist_title=cl.title,
+                completed_at=comp.completed_at,
+                items_count=items_count,
+            )
+        )
+
+    return UserActivityPublic(attempts=attempt_publics, checklist_completions=completion_publics)
 
 
 @router.patch("/{user_id}/role", response_model=UserPublic)
