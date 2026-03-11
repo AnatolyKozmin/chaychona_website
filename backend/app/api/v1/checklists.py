@@ -48,6 +48,21 @@ def _norm(value: str | None) -> str:
     return " ".join((value or "").strip().lower().replace("ё", "е").split())
 
 
+def _parse_optional_int(value: str | int | None) -> int | None:
+    """Parse value to int, return None if invalid. Accepts string or int from query."""
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    s = (value or "").strip()
+    if not s:
+        return None
+    try:
+        return int(s)
+    except (TypeError, ValueError):
+        return None
+
+
 def _media_url(path: str | None) -> str | None:
     if not path:
         return None
@@ -298,21 +313,26 @@ def delete_checklist_admin(
 
 @router.get("/admin/completions", response_model=list[ChecklistCompletionPublic])
 def list_completions_admin(
-    checklist_id: int | None = Query(default=None),
+    checklist_id: str | None = Query(default=None),
     user_id: str | None = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=500),
+    limit_raw: str | int | None = Query(default=100, alias="limit"),
     _: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN)),
     db: Session = Depends(get_db),
 ):
+    checklist_id_int = _parse_optional_int(checklist_id)
+    limit_val = _parse_optional_int(limit_raw)
+    if limit_val is None or limit_val < 1:
+        limit_val = 100
+    limit_val = min(limit_val, 500)
     query = (
         select(ChecklistCompletion, Checklist, User)
         .join(Checklist, ChecklistCompletion.checklist_id == Checklist.id)
         .join(User, ChecklistCompletion.user_id == User.id)
         .order_by(ChecklistCompletion.completed_at.desc())
-        .limit(limit)
+        .limit(limit_val)
     )
-    if checklist_id is not None:
-        query = query.where(ChecklistCompletion.checklist_id == checklist_id)
+    if checklist_id_int is not None:
+        query = query.where(ChecklistCompletion.checklist_id == checklist_id_int)
     if user_id is not None:
         try:
             user_uuid = UUID(user_id)

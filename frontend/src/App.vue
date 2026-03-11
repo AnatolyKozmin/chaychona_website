@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "./stores/auth";
 
@@ -9,6 +9,8 @@ const route = useRoute();
 const mobileMenuOpen = ref(false);
 const usersDropdownOpen = ref(false);
 const checklistsDropdownOpen = ref(false);
+const checklistsDropdownRef = ref<HTMLElement | null>(null);
+const usersDropdownRef = ref<HTMLElement | null>(null);
 
 onMounted(async () => {
   if (auth.isAuthenticated) {
@@ -50,6 +52,25 @@ const isUsersSection = computed(() =>
 const isChecklistsSection = computed(() =>
   route.path === "/my-checklists" || route.path === "/checklists"
 );
+
+function handleClickOutside(e: MouseEvent) {
+  const target = e.target as Node;
+  if (
+    (checklistsDropdownOpen.value && checklistsDropdownRef.value && !checklistsDropdownRef.value.contains(target)) ||
+    (usersDropdownOpen.value && usersDropdownRef.value && !usersDropdownRef.value.contains(target))
+  ) {
+    checklistsDropdownOpen.value = false;
+    usersDropdownOpen.value = false;
+  }
+}
+
+onMounted(() => {
+  document.addEventListener("click", handleClickOutside);
+});
+
+onUnmounted(() => {
+  document.removeEventListener("click", handleClickOutside);
+});
 </script>
 
 <template>
@@ -68,21 +89,22 @@ const isChecklistsSection = computed(() =>
         <RouterLink to="/">Главная</RouterLink>
         <RouterLink to="/standards">Стандарты</RouterLink>
         <RouterLink to="/my-tests">Мои тесты</RouterLink>
-        <div class="menu-dropdown">
+        <RouterLink v-if="!auth.isAdmin && !auth.isSuperadmin" to="/my-checklists">Чек-листы</RouterLink>
+        <div v-else ref="checklistsDropdownRef" class="menu-dropdown">
           <button type="button" class="menu-dropdown-trigger" :class="{ active: checklistsDropdownOpen || isChecklistsSection }" @click="checklistsDropdownOpen = !checklistsDropdownOpen">
             Чек-листы ▾
           </button>
           <div v-show="checklistsDropdownOpen" class="menu-dropdown-panel">
             <RouterLink to="/my-checklists" @click="checklistsDropdownOpen = false">Чек-листы</RouterLink>
-            <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" to="/checklists" @click="checklistsDropdownOpen = false">Настройка чек-листов</RouterLink>
-            <RouterLink v-if="auth.isAdmin || auth.isSuperadmin" :to="{ path: '/checklists', query: { tab: 'reports' } }" @click="checklistsDropdownOpen = false">Отчёты</RouterLink>
+            <RouterLink to="/checklists" @click="checklistsDropdownOpen = false">Настройка чек-листов</RouterLink>
+            <RouterLink :to="{ path: '/checklists', query: { tab: 'reports' } }" @click="checklistsDropdownOpen = false">Отчёты</RouterLink>
           </div>
         </div>
         <RouterLink to="/tasty-notebook">Вкусная тетрадь</RouterLink>
         <RouterLink v-if="!auth.isSuperadmin && !auth.isAdmin" to="/statistics">Статистика</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests">Тесты</RouterLink>
         <RouterLink v-if="auth.isSuperadmin" to="/tests-analytics">Аналитика</RouterLink>
-        <div v-if="auth.isAdmin || auth.isSuperadmin" class="menu-dropdown">
+        <div v-if="auth.isAdmin || auth.isSuperadmin" ref="usersDropdownRef" class="menu-dropdown">
           <button type="button" class="menu-dropdown-trigger" :class="{ active: usersDropdownOpen || isUsersSection }" @click="usersDropdownOpen = !usersDropdownOpen">
             Пользователи ▾
           </button>
