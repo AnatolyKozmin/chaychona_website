@@ -1178,6 +1178,214 @@ tr:hover td {
   margin-top: 10px;
 }
 
+/* Стандарты — карточки курсов */
+.standards-course-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.standards-course-card {
+  border: 1px solid #e5ebf6;
+  border-radius: 14px;
+  padding: 20px;
+  background: #fbfcff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.standards-course-card:hover {
+  border-color: #c5d4f0;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.08);
+}
+
+.standards-course-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.standards-course-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #1e293b;
+  flex: 1;
+  min-width: 0;
+}
+
+.standards-course-badge {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.standards-course-badge--done {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.standards-course-badge--progress {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.standards-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.standards-progress-bar {
+  flex: 1;
+  height: 10px;
+  background: #e8eef6;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.standards-progress-bar--shimmer {
+  position: relative;
+}
+
+.standards-progress-bar--shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.6) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: standards-shimmer 2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes standards-shimmer {
+  0%, 100% { background-position: 200% 0; }
+  50% { background-position: -200% 0; }
+}
+
+.standards-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #60a5fa 0%, #2563eb 100%);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.standards-progress-text {
+  font-size: 0.85rem;
+  color: #64748b;
+  font-weight: 500;
+  min-width: 36px;
+  text-align: right;
+}
+
+.standards-course-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.standards-course-btn {
+  flex: 1;
+  margin: 0;
+  padding: 10px 16px;
+}
+
+.standards-course-btn-ghost {
+  padding: 10px 14px;
+}
+
+/* Стандарты — экран изучения */
+.standards-study-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.standards-back-btn {
+  flex-shrink: 0;
+  padding: 8px 12px;
+}
+
+.standards-study-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.standards-progress-wrap--study {
+  margin-bottom: 18px;
+}
+
+.standards-tinder-card {
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.standards-block-heading {
+  margin: 0 0 12px 0;
+  font-size: 1.2rem;
+  color: #1e293b;
+}
+
+.standards-subblock {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed #e8eef6;
+}
+
+.standards-subblock-heading {
+  margin: 0 0 8px 0;
+  font-size: 1rem;
+  color: #475569;
+}
+
+.standards-subblock-img {
+  width: 100%;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  display: block;
+}
+
+.standards-block-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #e8eef6;
+}
+
+.standards-block-actions button {
+  margin: 0;
+}
+
+.standards-understood-btn {
+  padding: 12px 28px;
+  font-weight: 600;
+}
+
+.standards-test-link {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #e8eef6;
+}
+
+.standards-test-link button {
+  width: 100%;
+  margin: 0;
+}
+
 /* Вкусная тетрадь — кнопки категорий */
 .notebook-category-grid {
   display: grid;

@@ -350,54 +350,41 @@ watch(
       <h2 style="margin: 0">Стандарты</h2>
       <button type="button" class="ghost" @click="loadCourses">Обновить</button>
     </div>
-    <p class="muted">Уроки с блоками: читаем по карточкам и листаем вправо/влево.</p>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="success" class="muted">{{ success }}</p>
     <p v-if="loading">Загрузка...</p>
 
     <template v-if="!loading">
       <template v-if="!adminAllowed">
-        <p v-if="learnerCourses.length === 0" class="muted">Для вас пока нет назначенных обучений.</p>
-        <div v-else class="clean-list">
-          <div v-for="course in learnerCourses" :key="course.id" class="clean-item">
-            <div class="actions-row">
-              <div>
-                <strong>{{ course.title }}</strong>
-                <p class="muted" style="margin: 6px 0 0 0">
-                  {{ course.restaurant_name || "Все рестораны" }} • {{ course.job_title_name || "Все роли" }}
-                </p>
-              </div>
-              <span class="result-pill" :class="course.is_completed ? 'result-pill-success' : 'result-pill-error'">
+        <p v-if="learnerCourses.length === 0" class="muted">Для вас пока нет назначенных стандартов.</p>
+        <div v-else class="standards-course-grid">
+          <div v-for="course in learnerCourses" :key="course.id" class="standards-course-card">
+            <div class="standards-course-header">
+              <h3 class="standards-course-title">{{ course.title }}</h3>
+              <span class="standards-course-badge" :class="course.is_completed ? 'standards-course-badge--done' : 'standards-course-badge--progress'">
                 {{ course.is_completed ? "Изучено" : "В процессе" }}
               </span>
             </div>
-            <p v-if="course.description" class="muted long-text" style="margin-top: 8px">{{ course.description }}</p>
-            <div class="menu-stats-row">
-              <span class="status-chip">Прогресс: {{ course.progress_percent }}%</span>
-              <span class="status-chip">Блоков: {{ course.completed_blocks }}/{{ course.total_blocks }}</span>
-              <span v-if="course.linked_test_stats" class="status-chip status-chip-success">
-                Тест: {{ course.linked_test_stats.best_score_percent ?? 0 }}%
-              </span>
-            </div>
-            <div class="clean-list" style="margin-top: 8px">
-              <div v-for="block in course.blocks" :key="block.block_id" class="clean-item">
-                <div class="actions-row">
-                  <span class="long-text">{{ block.title }}</span>
-                  <span class="result-pill" :class="block.is_completed ? 'result-pill-success' : 'result-pill-error'">
-                    {{ block.is_completed ? "Понял" : "Не изучен" }}
-                  </span>
-                </div>
+            <div class="standards-progress-wrap">
+              <div class="standards-progress-bar">
+                <div
+                  class="standards-progress-fill"
+                  :style="{ width: `${course.progress_percent}%` }"
+                />
               </div>
+              <span class="standards-progress-text">{{ course.completed_blocks }}/{{ course.total_blocks }}</span>
             </div>
-            <div class="actions-row" style="margin-top: 10px">
-              <button type="button" @click="openCourseStudy(course.id)">Открыть обучение</button>
+            <div class="standards-course-actions">
+              <button type="button" class="standards-course-btn" @click="openCourseStudy(course.id)">
+                {{ course.is_completed ? "Повторить" : "Изучить" }}
+              </button>
               <button
                 v-if="course.linked_test_stats"
                 type="button"
-                class="ghost"
+                class="ghost standards-course-btn-ghost"
                 @click="router.push({ name: 'my-tests', query: { test: String(course.linked_test_stats.test_id) } })"
               >
-                Открыть тест
+                Тест
               </button>
             </div>
           </div>

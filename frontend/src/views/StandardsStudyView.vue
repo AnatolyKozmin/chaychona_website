@@ -3,6 +3,9 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "../api/client";
 
+let dragStartX = 0;
+let dragging = false;
+
 interface CourseSubBlock {
   id: number;
   heading: string | null;
@@ -64,6 +67,7 @@ const saving = ref(false);
 const error = ref("");
 const study = ref<StudyResponse | null>(null);
 const activeBlockIdx = ref(0);
+const cardOffsetX = ref(0);
 
 const activeBlock = computed(() => study.value?.course.blocks[activeBlockIdx.value] ?? null);
 const activeProgress = computed(() => study.value?.blocks_progress[activeBlockIdx.value] ?? null);
@@ -160,58 +164,66 @@ function goNext() {
   activeBlockIdx.value += 1;
 }
 
+function onPointerDown(event: PointerEvent) {
+  dragging = true;
+  dragStartX = event.clientX;
+}
+
+function onPointerMove(event: PointerEvent) {
+  if (!dragging) return;
+  cardOffsetX.value = event.clientX - dragStartX;
+}
+
+function onPointerUp() {
+  if (!dragging) return;
+  const threshold = 90;
+  if (cardOffsetX.value <= -threshold) {
+    if (canGoNext.value) goNext();
+  } else if (cardOffsetX.value >= threshold) {
+    if (canGoPrev.value) goPrev();
+  }
+  cardOffsetX.value = 0;
+  dragging = false;
+}
+
 onMounted(async () => {
   await loadStudy();
 });
 </script>
 
 <template>
-  <section class="card">
-    <div class="actions-row">
-      <h2 style="margin: 0">Обучение</h2>
-      <button type="button" class="ghost" @click="router.push({ name: 'standards' })">К списку стандартов</button>
+  <section class="card standards-study-card">
+    <div class="standards-study-header">
+      <button type="button" class="ghost standards-back-btn" @click="router.push({ name: 'standards' })">
+        ← Назад
+      </button>
+      <h2 class="standards-study-title">{{ study?.course?.title ?? "Стандарт" }}</h2>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="loading">Загрузка...</p>
 
     <template v-if="!loading && study">
-      <h3 style="margin-bottom: 6px">{{ study.course.title }}</h3>
-      <p class="muted" style="margin-top: 0">
-        {{ study.course.restaurant_name || "Все рестораны" }} • {{ study.course.job_title_name || "Все роли" }}
-      </p>
-      <p v-if="study.course.description" class="muted long-text">{{ study.course.description }}</p>
-
-      <div class="menu-stats-row">
-        <span class="status-chip">Прогресс: {{ study.progress_percent }}%</span>
-        <span v-if="study.linked_test_stats" class="status-chip status-chip-success">
-          Лучший тест: {{ study.linked_test_stats.best_score_percent ?? 0 }}%
-        </span>
-      </div>
-
-      <div class="clean-list" style="margin-top: 10px">
-        <div v-for="(item, idx) in study.blocks_progress" :key="item.block_id" class="clean-item">
-          <div class="actions-row">
-            <button
-              type="button"
-              class="ghost"
-              :disabled="!item.is_unlocked"
-              @click="activeBlockIdx = idx"
-              style="text-align: left; margin: 0; width: auto; padding: 6px 10px"
-            >
-              {{ item.title }}
-            </button>
-            <span class="result-pill" :class="item.is_completed ? 'result-pill-success' : 'result-pill-error'">
-              {{ item.is_completed ? "Понял" : item.is_unlocked ? "Открыт" : "Закрыт" }}
-            </span>
-          </div>
+      <div class="standards-progress-wrap standards-progress-wrap--study">
+        <div class="standards-progress-bar standards-progress-bar--shimmer">
+          <div
+            class="standards-progress-fill"
+            :style="{ width: `${study.progress_percent}%` }"
+          />
         </div>
+        <span class="standards-progress-text">{{ activeBlockIdx + 1 }} / {{ study.course.blocks.length }}</span>
       </div>
 
-      <div v-if="activeBlock && activeProgress" class="tinder-card" style="margin-top: 12px">
-        <p class="muted" style="margin-top: 0">
-          Этап {{ activeBlockIdx + 1 }} из {{ study.course.blocks.length }}
-        </p>
-        <h3 style="margin-top: 0">{{ activeBlock.heading || activeProgress.title }}</h3>
+      <div
+        v-if="activeBlock && activeProgress"
+        class="tinder-card standards-tinder-card"
+        :style="{ transform: `translateX(${cardOffsetX}px) rotate(${cardOffsetX / 18}deg)` }"
+        @pointerdown="onPointerDown"
+        @pointermove="onPointerMove"
+        @pointerup="onPointerUp"
+        @pointercancel="onPointerUp"
+        @pointerleave="onPointerUp"
+      >
+        <h3 class="standards-block-heading">{{ activeBlock.heading || activeProgress.title }}</h3>
         <img
           v-if="activeBlock.image_path"
           :src="toMediaUrl(activeBlock.image_path) || undefined"
@@ -219,32 +231,29 @@ onMounted(async () => {
           style="width: 100%; border-radius: 12px; margin-bottom: 10px"
         />
         <p class="long-text">{{ activeBlock.text }}</p>
-        <div v-for="subblock in activeBlock.subblocks" :key="subblock.id" class="clean-item" style="margin-top: 10px">
-          <h4 v-if="subblock.heading" style="margin-top: 0">{{ subblock.heading }}</h4>
+        <div v-for="subblock in activeBlock.subblocks" :key="subblock.id" class="standards-subblock">
+          <h4 v-if="subblock.heading" class="standards-subblock-heading">{{ subblock.heading }}</h4>
           <img
             v-if="subblock.image_path"
             :src="toMediaUrl(subblock.image_path) || undefined"
-            alt="subblock image"
-            style="width: 100%; border-radius: 10px; margin-bottom: 8px"
+            alt=""
+            class="standards-subblock-img"
           />
-          <p class="long-text" style="margin-bottom: 0">{{ subblock.text }}</p>
+          <p class="long-text">{{ subblock.text }}</p>
         </div>
-        <div class="actions-row" style="margin-top: 10px">
-          <button type="button" class="ghost" :disabled="!canGoPrev" @click="goPrev">Назад</button>
-          <button type="button" :disabled="saving || activeProgress.is_completed" @click="markUnderstood">
+        <div class="standards-block-actions">
+          <button type="button" class="ghost" :disabled="!canGoPrev" @click="goPrev">←</button>
+          <button type="button" class="standards-understood-btn" :disabled="saving || activeProgress.is_completed" @click="markUnderstood">
             {{ activeProgress.is_completed ? "Изучено" : "Понял!" }}
           </button>
-          <button type="button" class="ghost" :disabled="!canGoNext" @click="goNext">Дальше</button>
+          <button type="button" class="ghost" :disabled="!canGoNext" @click="goNext">→</button>
         </div>
       </div>
 
-      <div v-if="study.linked_test_stats" class="card" style="margin-top: 12px">
-        <p><strong>Тест после обучения:</strong> {{ study.linked_test_stats.test_title }}</p>
-        <p class="muted">
-          Попыток: {{ study.linked_test_stats.attempts_count }} | Последний результат:
-          {{ study.linked_test_stats.last_score_percent ?? 0 }}%
-        </p>
-        <button type="button" @click="router.push({ name: 'my-tests' })">Перейти к тестам</button>
+      <div v-if="study.linked_test_stats" class="standards-test-link">
+        <button type="button" @click="router.push({ name: 'my-tests', query: { test: String(study.linked_test_stats.test_id) } })">
+          Пройти тест: {{ study.linked_test_stats.test_title }}
+        </button>
       </div>
     </template>
   </section>
