@@ -61,6 +61,22 @@ const editMode = ref(false);
 const importDryRun = ref(true);
 const importFile = ref<File | null>(null);
 const importReport = ref("");
+const importWordFile = ref<File | null>(null);
+const importWordCode = ref("");
+const importWordTitle = ref("");
+const importWordDescription = ref("");
+
+/** Предпросмотр импорта из Word */
+const wordPreviewOpen = ref(false);
+const wordPreviewSaving = ref(false);
+const wordPreview = reactive({
+  title: "",
+  external_code: "",
+  description: "",
+  restaurant_id: "",
+  job_title_id: "",
+  questions: [] as TestQuestion[]
+});
 
 const form = reactive({
   title: "",
@@ -90,6 +106,11 @@ const editForm = reactive({
 });
 const editRestaurant = computed(() => restaurants.value.find((r) => r.id === editForm.restaurant_id));
 const editAvailableRoles = computed(() => editRestaurant.value?.roles ?? []);
+
+const wordPreviewRestaurant = computed(() =>
+  restaurants.value.find((r) => r.id === wordPreview.restaurant_id)
+);
+const wordPreviewRoles = computed(() => wordPreviewRestaurant.value?.roles ?? []);
 
 function goToAnalytics() {
   router.push({ name: "tests-analytics" });
@@ -220,6 +241,179 @@ async function uploadImportFile() {
     }
   } finally {
     saving.value = false;
+  }
+}
+
+function onImportWordFileChange(event: Event) {
+  const target = event.target as HTMLInputElement;
+  importWordFile.value = target.files?.[0] ?? null;
+}
+
+async function parseWordForPreview() {
+  if (!importWordFile.value) {
+    error.value = "Выберите файл Word (.docx)";
+    return;
+  }
+  if (!form.restaurant_id || !form.job_title_id) {
+    error.value = "Выберите ресторан и роль в блоке «Новый тест» ниже";
+    return;
+  }
+  if (!importWordCode.value.trim() || !importWordTitle.value.trim()) {
+    error.value = "Укажите код теста и название";
+    return;
+  }
+  saving.value = true;
+  error.value = "";
+  try {
+    const formData = new FormData();
+    formData.append("file", importWordFile.value);
+    const { data } = await api.post<{ questions: TestQuestion[] }>("/tests/parse-docx", formData);
+    wordPreview.title = importWordTitle.value.trim();
+    wordPreview.external_code = importWordCode.value.trim();
+    wordPreview.description = importWordDescription.value.trim();
+    wordPreview.restaurant_id = form.restaurant_id;
+    wordPreview.job_title_id = form.job_title_id;
+    wordPreview.questions = cloneQuestions(data.questions);
+    wordPreviewOpen.value = true;
+    importReport.value = `Разобрано вопросов: ${data.questions.length}. Проверьте и при необходимости отредактируйте.`;
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail;
+    if (Array.isArray(detail)) {
+      error.value = detail.join(" | ");
+    } else {
+      error.value = detail ?? "Не удалось разобрать Word";
+    }
+  } finally {
+    saving.value = false;
+  }
+}
+
+function closeWordPreview() {
+  if (wordPreviewSaving.value) {
+    return;
+  }
+  wordPreviewOpen.value = false;
+}
+
+function onWordPreviewRestaurantChange() {
+  wordPreview.job_title_id = wordPreviewRoles.value[0]?.id ?? "";
+}
+
+function setWordPreviewCorrectSingle(question: TestQuestion, optionIndex: number) {
+  question.options.forEach((opt, idx) => {
+    opt.is_correct = idx === optionIndex;
+  });
+}
+
+function onWordPreviewQuestionTypeChange(question: TestQuestion) {
+  if (question.question_type === "single") {
+    const firstCorrect = question.options.findIndex((opt) => opt.is_correct);
+    setWordPreviewCorrectSingle(question, firstCorrect >= 0 ? firstCorrect : 0);
+  }
+}
+
+function addWordPreviewQuestion() {
+  wordPreview.questions.push({
+    text: "",
+    question_type: "single",
+    options: [
+      { text: "", is_correct: true },
+      { text: "", is_correct: false }
+    ]
+  });
+}
+
+function removeWordPreviewQuestion(index: number) {
+  if (wordPreview.questions.length <= 1) {
+    return;
+  }
+  wordPreview.questions.splice(index, 1);
+}
+
+function addWordPreviewOption(question: TestQuestion) {
+  question.options.push({ text: "", is_correct: false });
+}
+
+function removeWordPreviewOption(question: TestQuestion, optionIndex: number) {
+  if (question.options.length <= 2) {
+    return;
+  }
+  question.options.splice(optionIndex, 1);
+}
+
+async function applyWordImport(dryRun: boolean) {
+  if (!wordPreview.title.trim() || !wordPreview.external_code.trim()) {
+    error.value = "Укажите код и название теста";
+    return;
+  }
+  if (!wordPreview.restaurant_id || !wordPreview.job_title_id) {
+    error.value = "Выберите ресторан и роль";
+    return;
+  }
+  if (wordPreview.questions.length < 1) {
+    error.value = "Добавьте хотя бы один вопрос";
+    return;
+  }
+  for (let i = 0; i < wordPreview.questions.length; i++) {
+    const q = wordPreview.questions[i];
+    if (!q.text.trim()) {
+      error.value = `Пустой текст вопроса № ${i + 1}`;
+      return;
+    }
+    const filled = q.options.filter((o) => o.text.trim());
+    if (filled.length < 2) {
+      error.value = `Вопрос ${i + 1}: нужно минимум 2 непустых варианта`;
+      return;
+    }
+    const correct = q.options.filter((o) => o.is_correct && o.text.trim());
+    if (correct.length < 1) {
+      error.value = `Вопрос ${i + 1}: отметьте хотя бы один правильный вариант`;
+      return;
+    }
+    if (q.question_type === "single" && correct.length !== 1) {
+      error.value = `Вопрос ${i + 1}: для одного ответа отметьте ровно один вариант`;
+      return;
+    }
+  }
+
+  wordPreviewSaving.value = true;
+  error.value = "";
+  try {
+    const payload = {
+      external_code: wordPreview.external_code.trim(),
+      title: wordPreview.title.trim(),
+      description: wordPreview.description.trim() || null,
+      restaurant_id: wordPreview.restaurant_id,
+      job_title_id: wordPreview.job_title_id,
+      questions: wordPreview.questions.map((q) => ({
+        text: q.text.trim(),
+        question_type: q.question_type,
+        options: q.options
+          .filter((o) => o.text.trim())
+          .map((o) => ({ text: o.text.trim(), is_correct: o.is_correct }))
+      }))
+    };
+    const { data } = await api.post("/tests/import-apply", payload, {
+      params: { dry_run: dryRun }
+    });
+    importReport.value = dryRun
+      ? `Проверка пройдена: вопросов ${data.questions_count}, тест был бы ${data.mode === "created" ? "создан" : "обновлён"}. Нажмите «Сохранить», чтобы записать в базу.`
+      : `Сохранено: вопросов ${data.questions_count}, тест ${data.mode === "created" ? "создан" : "обновлён"}.`;
+    if (!dryRun) {
+      wordPreviewOpen.value = false;
+      await loadTests();
+    }
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail;
+    if (Array.isArray(detail)) {
+      error.value = detail.join(" | ");
+    } else if (typeof detail === "string") {
+      error.value = detail;
+    } else {
+      error.value = "Ошибка сохранения";
+    }
+  } finally {
+    wordPreviewSaving.value = false;
   }
 }
 
@@ -422,6 +616,50 @@ onMounted(async () => {
         Dry-run (только проверка, без сохранения)
       </label>
       <button type="button" class="test-import-btn" @click="uploadImportFile" :disabled="saving">Загрузить</button>
+    </div>
+
+    <hr class="card-divider" />
+
+    <div class="test-import-card card">
+      <h3>Импорт из Word (.docx)</h3>
+      <p class="muted" style="margin: 0 0 14px 0">
+        Вопросы с номерами «1.», «2.», варианты «A)», «B)» … Правильные ответы выделите <strong>жирным</strong> в Word.
+        Формат описан в <code>docs/word_tests_format.md</code>.
+      </p>
+      <p class="muted" style="margin: 0 0 10px 0">
+        Ресторан и роль берутся из блока ниже («Новый тест») — сначала выберите их там.
+      </p>
+      <div class="test-form-grid" style="margin-bottom: 12px">
+        <div class="test-form-field">
+          <label>Код теста (external_code)</label>
+          <input v-model="importWordCode" placeholder="например waiter_menu_01" class="test-question-input" />
+        </div>
+        <div class="test-form-field">
+          <label>Название теста</label>
+          <input v-model="importWordTitle" placeholder="Название для списка" class="test-question-input" />
+        </div>
+      </div>
+      <div class="test-form-field" style="margin-bottom: 12px">
+        <label>Описание (необязательно)</label>
+        <input v-model="importWordDescription" placeholder="Краткое описание" class="test-question-input" />
+      </div>
+      <div class="test-import-row">
+        <input type="file" accept=".docx" @change="onImportWordFileChange" class="test-file-input" />
+      </div>
+      <div class="test-form-actions" style="margin-top: 8px; flex-wrap: wrap; gap: 10px">
+        <button
+          type="button"
+          class="test-import-btn"
+          @click="parseWordForPreview"
+          :disabled="saving || wordPreviewSaving"
+        >
+          Разобрать и открыть предпросмотр
+        </button>
+      </div>
+      <p class="muted" style="margin: 10px 0 0 0; font-size: 0.9em">
+        После разбора откроется окно: можно править вопросы, варианты и тип (один или несколько правильных), затем
+        «Проверить без сохранения» или «Сохранить в базу».
+      </p>
     </div>
 
     <hr class="card-divider" />
@@ -643,6 +881,159 @@ onMounted(async () => {
           <button type="button" @click="saveEditedTest" :disabled="saving" class="test-submit-btn">Сохранить</button>
         </div>
       </template>
+    </div>
+  </div>
+
+  <div v-if="wordPreviewOpen" class="modal-backdrop" @click.self="closeWordPreview">
+    <div class="card modal-card word-preview-modal">
+      <div class="actions-row">
+        <h3 style="margin: 0">Предпросмотр: импорт из Word</h3>
+        <button type="button" class="ghost" @click="closeWordPreview" :disabled="wordPreviewSaving">Закрыть</button>
+      </div>
+      <p class="muted" style="margin-top: 0">
+        Проверьте разобранные данные. При необходимости измените код, название, ресторан, роль и сами вопросы.
+      </p>
+
+      <div class="test-form-grid">
+        <div class="test-form-field">
+          <label>Код теста (external_code)</label>
+          <input v-model="wordPreview.external_code" class="test-question-input" />
+        </div>
+        <div class="test-form-field">
+          <label>Название теста</label>
+          <input v-model="wordPreview.title" class="test-question-input" />
+        </div>
+      </div>
+      <div class="test-form-field" style="margin-bottom: 12px">
+        <label>Описание (необязательно)</label>
+        <input v-model="wordPreview.description" class="test-question-input" />
+      </div>
+      <div class="test-form-grid" style="margin-bottom: 8px">
+        <div class="test-form-field">
+          <label>Ресторан</label>
+          <select v-model="wordPreview.restaurant_id" @change="onWordPreviewRestaurantChange" required>
+            <option value="" disabled>Выберите ресторан</option>
+            <option v-for="restaurant in restaurants" :key="restaurant.id" :value="restaurant.id">
+              {{ restaurant.name }}
+            </option>
+          </select>
+        </div>
+        <div class="test-form-field">
+          <label>Роль</label>
+          <select v-model="wordPreview.job_title_id" required>
+            <option value="" disabled>Выберите роль</option>
+            <option v-for="role in wordPreviewRoles" :key="role.id" :value="role.id">
+              {{ role.name }}
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <h4 style="margin: 12px 0 8px 0">Вопросы</h4>
+      <p v-if="wordPreview.questions.length === 0" class="muted" style="margin: 0 0 10px 0">
+        В файле не найдено вопросов по формату — добавьте их вручную кнопкой ниже.
+      </p>
+      <div class="test-questions-block">
+        <div v-for="(question, qIdx) in wordPreview.questions" :key="qIdx" class="test-question-card">
+          <div class="test-question-header">
+            <span class="test-question-num">Вопрос {{ qIdx + 1 }}</span>
+            <button
+              type="button"
+              class="ghost test-question-remove"
+              @click="removeWordPreviewQuestion(qIdx)"
+              :disabled="wordPreviewSaving"
+            >
+              Удалить
+            </button>
+          </div>
+          <div class="test-form-field">
+            <label>Текст вопроса</label>
+            <textarea
+              v-model="question.text"
+              required
+              rows="2"
+              placeholder="Текст вопроса"
+              class="test-question-text"
+              :disabled="wordPreviewSaving"
+            />
+          </div>
+          <div class="test-form-field test-type-select">
+            <label>Тип ответа</label>
+            <select
+              v-model="question.question_type"
+              @change="onWordPreviewQuestionTypeChange(question)"
+              :disabled="wordPreviewSaving"
+            >
+              <option value="single">Один правильный вариант</option>
+              <option value="multiple">Несколько правильных вариантов</option>
+            </select>
+          </div>
+
+          <div class="test-options-block">
+            <label>Варианты ответов</label>
+            <div v-for="(option, oIdx) in question.options" :key="oIdx" class="test-option-row">
+              <input
+                v-if="question.question_type === 'single'"
+                type="radio"
+                :name="`word-preview-q-${qIdx}`"
+                :checked="option.is_correct"
+                :disabled="wordPreviewSaving"
+                @change="setWordPreviewCorrectSingle(question, oIdx)"
+                class="test-option-radio"
+              />
+              <input
+                v-else
+                type="checkbox"
+                v-model="option.is_correct"
+                class="test-option-checkbox"
+                :disabled="wordPreviewSaving"
+              />
+              <input
+                v-model="option.text"
+                placeholder="Вариант ответа"
+                required
+                class="test-option-input"
+                :disabled="wordPreviewSaving"
+              />
+              <button
+                type="button"
+                class="ghost test-option-remove"
+                @click="removeWordPreviewOption(question, oIdx)"
+                title="Удалить"
+                :disabled="wordPreviewSaving"
+              >
+                ×
+              </button>
+            </div>
+            <button
+              type="button"
+              class="ghost test-add-option"
+              @click="addWordPreviewOption(question)"
+              :disabled="wordPreviewSaving"
+            >
+              + Добавить вариант
+            </button>
+          </div>
+        </div>
+        <button
+          type="button"
+          class="ghost test-add-question"
+          @click="addWordPreviewQuestion"
+          :disabled="wordPreviewSaving"
+        >
+          + Добавить вопрос
+        </button>
+      </div>
+
+      <div class="test-form-actions" style="margin-top: 16px; flex-wrap: wrap">
+        <button type="button" class="ghost" @click="closeWordPreview" :disabled="wordPreviewSaving">Закрыть</button>
+        <button type="button" class="ghost" @click="applyWordImport(true)" :disabled="wordPreviewSaving">
+          Проверить без сохранения
+        </button>
+        <button type="button" class="test-submit-btn" @click="applyWordImport(false)" :disabled="wordPreviewSaving">
+          Сохранить в базу
+        </button>
+      </div>
     </div>
   </div>
 </template>

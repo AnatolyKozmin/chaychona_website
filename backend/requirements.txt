@@ -9,5 +9,6 @@ passlib
 python-multipart
 python-dotenv
 openpyxl
+python-docx
 pytest>=8.0
 httpx

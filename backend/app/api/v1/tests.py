@@ -1,8 +1,9 @@
 import io
+import random
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.db.session import get_db
+from app.word_tests_import import parse_docx_to_questions
 from app.models.quiz import QuestionType, QuizAttempt, QuizAttemptAnswer, QuizOption, QuizQuestion, QuizTest
 from app.models.user import JobTitleCatalog, RestaurantCatalog, Role, User
 from app.schemas.quiz import (
@@ -307,6 +309,8 @@ def take_test(
             )
         )
 
+    random.shuffle(question_public)
+
     return QuizTestTakePublic(
         id=test.id,
         title=test.title,
@@ -371,18 +375,21 @@ def get_my_attempt_detail(
     answers = list(
         db.scalars(select(QuizAttemptAnswer).where(QuizAttemptAnswer.attempt_id == attempt_id).order_by(QuizAttemptAnswer.id.asc())).all()
     )
+    detail_results = [
+        QuizAttemptQuestionDetailPublic(
+            question_id=answer.question_id,
+            question_text=answer.question_text,
+            selected_options=_split_saved_options(answer.selected_options_text),
+            correct_options=_split_saved_options(answer.correct_options_text),
+            is_correct=answer.is_correct,
+        )
+        for answer in answers
+    ]
+    rng = random.Random(attempt.id)
+    rng.shuffle(detail_results)
     return QuizAttemptDetailPublic(
         attempt=_build_attempt_public(db, attempt),
-        results=[
-            QuizAttemptQuestionDetailPublic(
-                question_id=answer.question_id,
-                question_text=answer.question_text,
-                selected_options=_split_saved_options(answer.selected_options_text),
-                correct_options=_split_saved_options(answer.correct_options_text),
-                is_correct=answer.is_correct,
-            )
-            for answer in answers
-        ],
+        results=detail_results,
     )
 
 
@@ -564,6 +571,8 @@ def submit_test(
                 is_correct=is_correct,
             )
         )
+
+    random.shuffle(results)
 
     total_questions = len(questions)
     attempt = QuizAttempt(
@@ -851,6 +860,142 @@ async def import_tests_from_xlsx(
         "created": created,
         "updated": updated,
         "errors": [],
+    }
+
+
+@router.post("/import-docx")
+async def import_tests_from_docx(
+    file: UploadFile = File(...),
+    restaurant_id: str = Form(...),
+    job_title_id: str = Form(...),
+    title: str = Form(...),
+    external_code: str = Form(...),
+    description: str | None = Form(default=None),
+    dry_run: bool = Query(default=True),
+    current_user: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    """
+    Импорт одного теста из .docx: вопросы в нумерованном виде «1.», варианты «A)», «B)», …;
+    правильные ответы выделены жирным в Word.
+    """
+    name = (file.filename or "").lower()
+    if not name.endswith(".docx"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Нужен файл .docx (Word)",
+        )
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пустой")
+
+    try:
+        UUID(restaurant_id)
+        UUID(job_title_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Некорректный ID ресторана или роли",
+        ) from exc
+
+    questions, errors = parse_docx_to_questions(content)
+    if errors:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=errors)
+
+    payload = QuizTestCreate.model_validate(
+        {
+            "external_code": external_code.strip(),
+            "title": title.strip(),
+            "description": description.strip() if description else None,
+            "restaurant_id": restaurant_id,
+            "job_title_id": job_title_id,
+            "questions": questions,
+        }
+    )
+
+    existing = db.scalar(select(QuizTest).where(QuizTest.external_code == payload.external_code))
+    _, mode = _upsert_test(
+        db,
+        payload=payload,
+        created_by_user_id=current_user.id,
+        existing_test=existing,
+    )
+
+    if dry_run:
+        db.rollback()
+    else:
+        db.commit()
+
+    return {
+        "dry_run": dry_run,
+        "tests_in_file": 1,
+        "created": 1 if mode == "created" else 0,
+        "updated": 1 if mode == "updated" else 0,
+        "mode": mode,
+        "questions_count": len(questions),
+        "errors": [],
+    }
+
+
+@router.post("/parse-docx")
+async def parse_docx_preview(
+    file: UploadFile = File(...),
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+):
+    """Только разбор .docx без записи в БД — для предпросмотра и правок на фронте."""
+    name = (file.filename or "").lower()
+    if not name.endswith(".docx"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Нужен файл .docx (Word)",
+        )
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пустой")
+
+    questions, errors = parse_docx_to_questions(content)
+    if errors:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=errors)
+
+    return {"questions": questions}
+
+@router.post("/import-apply")
+def import_apply_test_payload(
+    payload: QuizTestCreate,
+    dry_run: bool = Query(default=False),
+    current_user: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    """
+    Сохранение теста после предпросмотра/редактирования (тот же upsert по external_code, что и import-docx).
+    """
+    if not payload.external_code or not str(payload.external_code).strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Укажите код теста (external_code)",
+        )
+
+    existing = db.scalar(
+        select(QuizTest).where(QuizTest.external_code == str(payload.external_code).strip())
+    )
+    _, mode = _upsert_test(
+        db,
+        payload=payload,
+        created_by_user_id=current_user.id,
+        existing_test=existing,
+    )
+
+    if dry_run:
+        db.rollback()
+    else:
+        db.commit()
+
+    return {
+        "dry_run": dry_run,
+        "created": 1 if mode == "created" else 0,
+        "updated": 1 if mode == "updated" else 0,
+        "mode": mode,
+        "questions_count": len(payload.questions),
     }
 
 
