@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 
 type UserRole = "superadmin" | "admin" | "learner";
+type TabId = "users" | "requests" | "catalog";
 
 interface UserRecord {
   id: string;
@@ -48,6 +49,13 @@ const error = ref("");
 const requests = ref<RegistrationRequest[]>([]);
 const learnerEdits = reactive<Record<string, { restaurant: string; job_title: string }>>({});
 
+const activeTab = ref<TabId>("users");
+const newRestaurantName = ref("");
+const catalogError = ref("");
+const catalogSuccess = ref("");
+
+const pendingCount = computed(() => requests.value.filter((r) => r.status === "pending").length);
+
 function extractError(e: any, fallback: string): string {
   const detail = e?.response?.data?.detail;
   if (Array.isArray(detail)) {
@@ -60,6 +68,12 @@ function extractError(e: any, fallback: string): string {
 function getRolesForRestaurant(restaurantName: string): CatalogItem[] {
   const selected = restaurantsWithRoles.value.find((item) => item.name === restaurantName);
   return selected?.roles ?? [];
+}
+
+function pluralRoles(n: number): string {
+  if (n % 10 === 1 && n % 100 !== 11) return "должность";
+  if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) return "должности";
+  return "должностей";
 }
 
 async function loadCatalogs() {
@@ -88,11 +102,6 @@ async function loadUsers() {
 
 async function updateRole(user: UserRecord, role: UserRole) {
   await api.patch(`/users/${user.id}/role`, { role });
-  await loadUsers();
-}
-
-async function updateJobTitle(user: UserRecord, jobTitle: string) {
-  await api.patch(`/users/${user.id}/job-title`, { job_title: jobTitle || null });
   await loadUsers();
 }
 
@@ -129,6 +138,21 @@ async function rejectRequest(requestId: string) {
   await loadRequests();
 }
 
+async function createRestaurant() {
+  const name = newRestaurantName.value.trim();
+  if (!name) return;
+  catalogError.value = "";
+  catalogSuccess.value = "";
+  try {
+    await api.post("/users/catalog/restaurants", { name });
+    newRestaurantName.value = "";
+    catalogSuccess.value = `Ресторан «${name}» добавлен`;
+    await loadCatalogs();
+  } catch (e: any) {
+    catalogError.value = extractError(e, "Не удалось создать ресторан");
+  }
+}
+
 onMounted(async () => {
   await loadCatalogs();
   await loadUsers();
@@ -140,67 +164,97 @@ onMounted(async () => {
   <section class="card">
     <h2>Доступы</h2>
     <p class="page-desc">Управление ролями, ресторанами и должностями пользователей.</p>
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="loading">Загрузка...</p>
-    <div v-else class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Имя</th>
-            <th>Ресторан</th>
-            <th>Логин</th>
-            <th>Роль</th>
-            <th>Должность</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="user in users" :key="user.id">
-            <td>{{ user.full_name }}</td>
-            <td>{{ user.restaurant || "-" }}</td>
-            <td>{{ user.email }}</td>
-            <td>
-              <select
-                :value="user.role"
-                :disabled="!auth.isSuperadmin || user.id === auth.user?.id"
-                @change="updateRole(user, ($event.target as HTMLSelectElement).value as UserRole)"
-              >
-                <option value="superadmin">Суперадмин</option>
-                <option value="admin">Админ</option>
-                <option value="learner">Обучающийся</option>
-              </select>
-            </td>
-            <td>
-              <div v-if="user.role === 'learner'" class="actions-row" style="flex-wrap: wrap; gap: 8px">
-                <select v-model="learnerEdits[user.id].restaurant">
-                  <option value="" disabled>Ресторан</option>
-                  <option v-for="r in restaurantsWithRoles" :key="r.id" :value="r.name">{{ r.name }}</option>
-                </select>
-                <select v-model="learnerEdits[user.id].job_title">
-                  <option value="" disabled>Должность</option>
-                  <option
-                    v-for="role in getRolesForRestaurant(learnerEdits[user.id].restaurant)"
-                    :key="role.id"
-                    :value="role.name"
-                  >
-                    {{ role.name }}
-                  </option>
-                </select>
-                <button type="button" @click="saveLearnerProfile(user)">Сохранить</button>
-              </div>
-              <span v-else>—</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+
+    <div class="tests-tabs">
+      <button
+        class="tests-tab"
+        :class="{ active: activeTab === 'users' }"
+        type="button"
+        @click="activeTab = 'users'"
+      >Пользователи</button>
+      <button
+        v-if="auth.isSuperadmin"
+        class="tests-tab"
+        :class="{ active: activeTab === 'requests' }"
+        type="button"
+        @click="activeTab = 'requests'"
+      >
+        Заявки
+        <span v-if="pendingCount > 0" class="tab-badge">{{ pendingCount }}</span>
+      </button>
+      <button
+        v-if="auth.isSuperadmin"
+        class="tests-tab"
+        :class="{ active: activeTab === 'catalog' }"
+        type="button"
+        @click="activeTab = 'catalog'"
+      >Каталог</button>
     </div>
 
-    <div v-if="auth.isSuperadmin" class="card" style="margin-top: 24px">
-      <div class="actions-row">
-        <h3 style="margin: 0">Заявки на доступ</h3>
+    <!-- Пользователи -->
+    <div v-if="activeTab === 'users'">
+      <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="loading">Загрузка...</p>
+      <div v-else class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Имя</th>
+              <th>Ресторан</th>
+              <th>Логин</th>
+              <th>Роль</th>
+              <th>Должность</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="user in users" :key="user.id">
+              <td>{{ user.full_name }}</td>
+              <td>{{ user.restaurant || "-" }}</td>
+              <td>{{ user.email }}</td>
+              <td>
+                <select
+                  :value="user.role"
+                  :disabled="!auth.isSuperadmin || user.id === auth.user?.id"
+                  @change="updateRole(user, ($event.target as HTMLSelectElement).value as UserRole)"
+                >
+                  <option value="superadmin">Суперадмин</option>
+                  <option value="admin">Админ</option>
+                  <option value="learner">Обучающийся</option>
+                </select>
+              </td>
+              <td>
+                <div v-if="user.role === 'learner'" class="actions-row" style="flex-wrap: wrap; gap: 8px">
+                  <select v-model="learnerEdits[user.id].restaurant">
+                    <option value="" disabled>Ресторан</option>
+                    <option v-for="r in restaurantsWithRoles" :key="r.id" :value="r.name">{{ r.name }}</option>
+                  </select>
+                  <select v-model="learnerEdits[user.id].job_title">
+                    <option value="" disabled>Должность</option>
+                    <option
+                      v-for="role in getRolesForRestaurant(learnerEdits[user.id].restaurant)"
+                      :key="role.id"
+                      :value="role.name"
+                    >
+                      {{ role.name }}
+                    </option>
+                  </select>
+                  <button type="button" @click="saveLearnerProfile(user)">Сохранить</button>
+                </div>
+                <span v-else>—</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Заявки на доступ -->
+    <div v-if="activeTab === 'requests' && auth.isSuperadmin">
+      <div class="actions-row" style="margin-bottom: 14px">
+        <p class="muted" style="margin: 0">Пользователи, которые хотят получить доступ к системе. Одобрите или отклоните заявку.</p>
         <button type="button" class="ghost" @click="loadRequests">Обновить</button>
       </div>
-      <p class="muted" style="margin: 8px 0 0 0">Пользователи, которые хотят получить доступ к системе. Одобрите или отклоните заявку.</p>
-      <div class="table-wrap" style="margin-top: 14px">
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -241,6 +295,28 @@ onMounted(async () => {
         </table>
       </div>
       <p v-if="requests.length === 0" class="muted" style="margin-top: 10px">Заявок пока нет.</p>
+    </div>
+
+    <!-- Каталог -->
+    <div v-if="activeTab === 'catalog' && auth.isSuperadmin">
+      <h3 style="margin: 0 0 14px 0">Рестораны</h3>
+      <div class="add-catalog-row">
+        <input
+          v-model="newRestaurantName"
+          placeholder="Название ресторана"
+          @keyup.enter="createRestaurant"
+        />
+        <button type="button" @click="createRestaurant">Добавить</button>
+      </div>
+      <p v-if="catalogError" class="error" style="margin-top: 8px">{{ catalogError }}</p>
+      <p v-if="catalogSuccess" class="success" style="margin-top: 8px">{{ catalogSuccess }}</p>
+      <div class="catalog-list" style="margin-top: 14px">
+        <div v-for="r in restaurantsWithRoles" :key="r.id" class="catalog-item">
+          <span class="catalog-item-name">{{ r.name }}</span>
+          <span class="muted catalog-item-meta">{{ r.roles.length }} {{ pluralRoles(r.roles.length) }}</span>
+        </div>
+        <p v-if="restaurantsWithRoles.length === 0" class="muted">Рестораны не добавлены.</p>
+      </div>
     </div>
   </section>
 </template>
