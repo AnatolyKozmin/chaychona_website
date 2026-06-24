@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/auth";
+import RestaurantRolesManager from "../components/RestaurantRolesManager.vue";
 
 type UserRole = "superadmin" | "admin" | "learner";
 type TabId = "users" | "requests" | "catalog";
@@ -50,9 +51,6 @@ const requests = ref<RegistrationRequest[]>([]);
 const learnerEdits = reactive<Record<string, { restaurant: string; job_title: string }>>({});
 
 const activeTab = ref<TabId>("users");
-const newRestaurantName = ref("");
-const catalogError = ref("");
-const catalogSuccess = ref("");
 
 const pendingCount = computed(() => requests.value.filter((r) => r.status === "pending").length);
 
@@ -68,12 +66,6 @@ function extractError(e: any, fallback: string): string {
 function getRolesForRestaurant(restaurantName: string): CatalogItem[] {
   const selected = restaurantsWithRoles.value.find((item) => item.name === restaurantName);
   return selected?.roles ?? [];
-}
-
-function pluralRoles(n: number): string {
-  if (n % 10 === 1 && n % 100 !== 11) return "должность";
-  if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) return "должности";
-  return "должностей";
 }
 
 async function loadCatalogs() {
@@ -138,19 +130,9 @@ async function rejectRequest(requestId: string) {
   await loadRequests();
 }
 
-async function createRestaurant() {
-  const name = newRestaurantName.value.trim();
-  if (!name) return;
-  catalogError.value = "";
-  catalogSuccess.value = "";
-  try {
-    await api.post("/users/catalog/restaurants", { name });
-    newRestaurantName.value = "";
-    catalogSuccess.value = `Ресторан «${name}» добавлен`;
-    await loadCatalogs();
-  } catch (e: any) {
-    catalogError.value = extractError(e, "Не удалось создать ресторан");
-  }
+async function onCatalogChanged() {
+  await loadCatalogs();
+  await loadUsers();
 }
 
 onMounted(async () => {
@@ -299,24 +281,7 @@ onMounted(async () => {
 
     <!-- Каталог -->
     <div v-if="activeTab === 'catalog' && auth.isSuperadmin">
-      <h3 style="margin: 0 0 14px 0">Рестораны</h3>
-      <div class="add-catalog-row">
-        <input
-          v-model="newRestaurantName"
-          placeholder="Название ресторана"
-          @keyup.enter="createRestaurant"
-        />
-        <button type="button" @click="createRestaurant">Добавить</button>
-      </div>
-      <p v-if="catalogError" class="error" style="margin-top: 8px">{{ catalogError }}</p>
-      <p v-if="catalogSuccess" class="success" style="margin-top: 8px">{{ catalogSuccess }}</p>
-      <div class="catalog-list" style="margin-top: 14px">
-        <div v-for="r in restaurantsWithRoles" :key="r.id" class="catalog-item">
-          <span class="catalog-item-name">{{ r.name }}</span>
-          <span class="muted catalog-item-meta">{{ r.roles.length }} {{ pluralRoles(r.roles.length) }}</span>
-        </div>
-        <p v-if="restaurantsWithRoles.length === 0" class="muted">Рестораны не добавлены.</p>
-      </div>
+      <RestaurantRolesManager @changed="onCatalogChanged" />
     </div>
   </section>
 </template>

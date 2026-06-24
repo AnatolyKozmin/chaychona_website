@@ -1,10 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/auth";
+import AssignmentPicker from "../components/AssignmentPicker.vue";
+import RestaurantRolesManager from "../components/RestaurantRolesManager.vue";
 
 type QuestionType = "single" | "multiple";
+
+interface Assignment {
+  restaurant_id: string;
+  job_title_id: string;
+}
 
 interface CatalogItem {
   id: string;
@@ -15,6 +22,13 @@ interface RestaurantWithRoles {
   id: string;
   name: string;
   roles: CatalogItem[];
+}
+
+interface TestAssignment {
+  restaurant_id: string;
+  restaurant_name: string;
+  job_title_id: string;
+  job_title_name: string;
 }
 
 interface TestOption {
@@ -37,6 +51,7 @@ interface TestPublic {
   restaurant_name: string;
   job_title_id: string;
   job_title_name: string;
+  assignments: TestAssignment[];
   created_at: string;
   questions: Array<{
     id: number;
@@ -65,6 +80,7 @@ const importWordFile = ref<File | null>(null);
 const importWordCode = ref("");
 const importWordTitle = ref("");
 const importWordDescription = ref("");
+const catalogModalOpen = ref(false);
 
 /** Предпросмотр импорта из Word */
 const wordPreviewOpen = ref(false);
@@ -73,16 +89,14 @@ const wordPreview = reactive({
   title: "",
   external_code: "",
   description: "",
-  restaurant_id: "",
-  job_title_id: "",
+  assignments: [] as Assignment[],
   questions: [] as TestQuestion[]
 });
 
 const form = reactive({
   title: "",
   description: "",
-  restaurant_id: "",
-  job_title_id: "",
+  assignments: [] as Assignment[],
   questions: [
     {
       text: "",
@@ -95,29 +109,27 @@ const form = reactive({
   ] as TestQuestion[]
 });
 
-const selectedRestaurant = computed(() => restaurants.value.find((r) => r.id === form.restaurant_id));
-const availableRoles = computed(() => selectedRestaurant.value?.roles ?? []);
 const editForm = reactive({
   title: "",
   description: "",
-  restaurant_id: "",
-  job_title_id: "",
+  assignments: [] as Assignment[],
   questions: [] as TestQuestion[]
 });
-const editRestaurant = computed(() => restaurants.value.find((r) => r.id === editForm.restaurant_id));
-const editAvailableRoles = computed(() => editRestaurant.value?.roles ?? []);
-
-const wordPreviewRestaurant = computed(() =>
-  restaurants.value.find((r) => r.id === wordPreview.restaurant_id)
-);
-const wordPreviewRoles = computed(() => wordPreviewRestaurant.value?.roles ?? []);
 
 function goToAnalytics() {
   router.push({ name: "tests-analytics" });
 }
 
-function onRestaurantChange() {
-  form.job_title_id = availableRoles.value[0]?.id ?? "";
+function openCatalogModal() {
+  catalogModalOpen.value = true;
+}
+
+function closeCatalogModal() {
+  catalogModalOpen.value = false;
+}
+
+async function onCatalogChanged() {
+  await loadCatalogs();
 }
 
 function addQuestion() {
@@ -165,21 +177,12 @@ function onQuestionTypeChange(question: TestQuestion) {
 async function loadCatalogs() {
   const { data } = await api.get<RestaurantWithRoles[]>("/users/catalog/restaurants-with-roles");
   restaurants.value = data;
-  if (!form.restaurant_id && data.length > 0) {
-    form.restaurant_id = data[0].id;
-    form.job_title_id = data[0].roles[0]?.id ?? "";
-  }
 }
 
 async function loadTests() {
   loading.value = true;
   try {
-    const { data } = await api.get<TestPublic[]>("/tests", {
-      params: {
-        restaurant_id: form.restaurant_id || undefined,
-        job_title_id: form.job_title_id || undefined
-      }
-    });
+    const { data } = await api.get<TestPublic[]>("/tests");
     tests.value = data;
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "Не удалось загрузить тесты";
@@ -254,10 +257,6 @@ async function parseWordForPreview() {
     error.value = "Выберите файл Word (.docx)";
     return;
   }
-  if (!form.restaurant_id || !form.job_title_id) {
-    error.value = "Выберите ресторан и роль в блоке «Новый тест» ниже";
-    return;
-  }
   if (!importWordCode.value.trim() || !importWordTitle.value.trim()) {
     error.value = "Укажите код теста и название";
     return;
@@ -271,8 +270,7 @@ async function parseWordForPreview() {
     wordPreview.title = importWordTitle.value.trim();
     wordPreview.external_code = importWordCode.value.trim();
     wordPreview.description = importWordDescription.value.trim();
-    wordPreview.restaurant_id = form.restaurant_id;
-    wordPreview.job_title_id = form.job_title_id;
+    wordPreview.assignments = [...form.assignments];
     wordPreview.questions = cloneQuestions(data.questions);
     wordPreviewOpen.value = true;
     importReport.value = `Разобрано вопросов: ${data.questions.length}. Проверьте и при необходимости отредактируйте.`;
@@ -293,10 +291,6 @@ function closeWordPreview() {
     return;
   }
   wordPreviewOpen.value = false;
-}
-
-function onWordPreviewRestaurantChange() {
-  wordPreview.job_title_id = wordPreviewRoles.value[0]?.id ?? "";
 }
 
 function setWordPreviewCorrectSingle(question: TestQuestion, optionIndex: number) {
@@ -346,8 +340,8 @@ async function applyWordImport(dryRun: boolean) {
     error.value = "Укажите код и название теста";
     return;
   }
-  if (!wordPreview.restaurant_id || !wordPreview.job_title_id) {
-    error.value = "Выберите ресторан и роль";
+  if (wordPreview.assignments.length === 0) {
+    error.value = "Отметьте хотя бы одну пару «ресторан + роль»";
     return;
   }
   if (wordPreview.questions.length < 1) {
@@ -383,8 +377,7 @@ async function applyWordImport(dryRun: boolean) {
       external_code: wordPreview.external_code.trim(),
       title: wordPreview.title.trim(),
       description: wordPreview.description.trim() || null,
-      restaurant_id: wordPreview.restaurant_id,
-      job_title_id: wordPreview.job_title_id,
+      assignments: wordPreview.assignments,
       questions: wordPreview.questions.map((q) => ({
         text: q.text.trim(),
         question_type: q.question_type,
@@ -433,8 +426,10 @@ function openTestModal(test: TestPublic) {
   editMode.value = false;
   editForm.title = test.title;
   editForm.description = test.description || "";
-  editForm.restaurant_id = test.restaurant_id;
-  editForm.job_title_id = test.job_title_id;
+  editForm.assignments = test.assignments.map((a) => ({
+    restaurant_id: a.restaurant_id,
+    job_title_id: a.job_title_id
+  }));
   editForm.questions = cloneQuestions(test.questions);
 }
 
@@ -449,10 +444,6 @@ function startEdit() {
     return;
   }
   editMode.value = true;
-}
-
-function onEditRestaurantChange() {
-  editForm.job_title_id = editAvailableRoles.value[0]?.id ?? "";
 }
 
 function addEditQuestion() {
@@ -501,6 +492,10 @@ async function saveEditedTest() {
   if (!modalTest.value) {
     return;
   }
+  if (editForm.assignments.length === 0) {
+    error.value = "Отметьте хотя бы одну пару «ресторан + роль»";
+    return;
+  }
   saving.value = true;
   error.value = "";
   success.value = "";
@@ -508,8 +503,7 @@ async function saveEditedTest() {
     await api.put(`/tests/${modalTest.value.id}`, {
       title: editForm.title,
       description: editForm.description || null,
-      restaurant_id: editForm.restaurant_id,
-      job_title_id: editForm.job_title_id,
+      assignments: editForm.assignments,
       questions: editForm.questions
     });
     success.value = "Тест успешно обновлен";
@@ -550,6 +544,10 @@ async function deleteSelectedTest() {
 }
 
 async function createTest() {
+  if (form.assignments.length === 0) {
+    error.value = "Отметьте хотя бы одну пару «ресторан + роль»";
+    return;
+  }
   saving.value = true;
   error.value = "";
   success.value = "";
@@ -557,13 +555,13 @@ async function createTest() {
     await api.post("/tests", {
       title: form.title,
       description: form.description || null,
-      restaurant_id: form.restaurant_id,
-      job_title_id: form.job_title_id,
+      assignments: form.assignments,
       questions: form.questions
     });
     success.value = "Тест успешно создан";
     form.title = "";
     form.description = "";
+    form.assignments = [];
     form.questions = [
       {
         text: "",
@@ -595,7 +593,10 @@ onMounted(async () => {
   <section class="card tests-page" v-if="auth.isSuperadmin">
     <div class="actions-row">
       <h2 style="margin: 0">Конструктор тестов</h2>
-      <button type="button" class="ghost" @click="goToAnalytics">Аналитика прохождений</button>
+      <div class="actions-row" style="gap: 8px">
+        <button type="button" class="ghost" @click="openCatalogModal">Рестораны и роли</button>
+        <button type="button" class="ghost" @click="goToAnalytics">Аналитика прохождений</button>
+      </div>
     </div>
     <p class="muted page-desc">Выберите ресторан и роль, затем добавьте вопросы и варианты ответов.</p>
     <p v-if="error" class="error">{{ error }}</p>
@@ -627,7 +628,7 @@ onMounted(async () => {
         Формат описан в <code>docs/word_tests_format.md</code>.
       </p>
       <p class="muted" style="margin: 0 0 10px 0">
-        Ресторан и роль берутся из блока ниже («Новый тест») — сначала выберите их там.
+        Рестораны и роли вы отметите галочками в окне предпросмотра после разбора файла.
       </p>
       <div class="test-form-grid" style="margin-bottom: 12px">
         <div class="test-form-field">
@@ -666,25 +667,9 @@ onMounted(async () => {
 
     <form class="test-create-form card" @submit.prevent="createTest">
       <h3>Новый тест</h3>
-      <div class="test-form-grid">
-        <div class="test-form-field">
-          <label>Ресторан</label>
-          <select v-model="form.restaurant_id" @change="onRestaurantChange" required>
-            <option value="" disabled>Выберите ресторан</option>
-            <option v-for="restaurant in restaurants" :key="restaurant.id" :value="restaurant.id">
-              {{ restaurant.name }}
-            </option>
-          </select>
-        </div>
-        <div class="test-form-field">
-          <label>Роль</label>
-          <select v-model="form.job_title_id" required>
-            <option value="" disabled>Выберите роль</option>
-            <option v-for="role in availableRoles" :key="role.id" :value="role.id">
-              {{ role.name }}
-            </option>
-          </select>
-        </div>
+      <div class="test-form-field">
+        <label>Кому назначить тест</label>
+        <AssignmentPicker v-model="form.assignments" :restaurants="restaurants" />
       </div>
       <div class="test-form-field">
         <label>Название теста</label>
@@ -764,8 +749,16 @@ onMounted(async () => {
         >
           <div class="test-list-item-title">{{ test.title }}</div>
           <div class="test-list-item-meta">
-            {{ test.restaurant_name }} · {{ test.job_title_name }}
+            <span v-if="test.assignments.length === 0" class="muted">Без привязки</span>
+            <template v-else>
+              {{ test.assignments.length }} {{ test.assignments.length === 1 ? "назначение" : "назначений" }}
+            </template>
             <span v-if="test.external_code" class="test-list-item-code">{{ test.external_code }}</span>
+          </div>
+          <div v-if="test.assignments.length > 0" class="test-list-item-assignments">
+            <span v-for="a in test.assignments" :key="a.restaurant_id + a.job_title_id" class="role-chip">
+              {{ a.restaurant_name }} · {{ a.job_title_name }}
+            </span>
           </div>
         </button>
       </div>
@@ -784,7 +777,12 @@ onMounted(async () => {
         <button type="button" class="ghost" @click="closeModal">Закрыть</button>
       </div>
       <p class="muted" v-if="modalTest.external_code">Код теста: {{ modalTest.external_code }}</p>
-      <p class="muted">{{ modalTest.restaurant_name }} / {{ modalTest.job_title_name }}</p>
+      <div class="catalog-roles" style="margin-bottom: 10px">
+        <span v-for="a in modalTest.assignments" :key="a.restaurant_id + a.job_title_id" class="role-chip">
+          {{ a.restaurant_name }} · {{ a.job_title_name }}
+        </span>
+        <span v-if="modalTest.assignments.length === 0" class="muted">Без привязки</span>
+      </div>
 
       <template v-if="!editMode">
         <p class="muted" v-if="modalTest.description">{{ modalTest.description }}</p>
@@ -813,25 +811,9 @@ onMounted(async () => {
           <label>Описание теста</label>
           <input v-model="editForm.description" />
         </div>
-        <div class="test-form-grid">
-          <div class="test-form-field">
-            <label>Ресторан</label>
-            <select v-model="editForm.restaurant_id" @change="onEditRestaurantChange" required>
-              <option value="" disabled>Выберите ресторан</option>
-              <option v-for="restaurant in restaurants" :key="restaurant.id" :value="restaurant.id">
-                {{ restaurant.name }}
-              </option>
-            </select>
-          </div>
-          <div class="test-form-field">
-            <label>Роль</label>
-            <select v-model="editForm.job_title_id" required>
-              <option value="" disabled>Выберите роль</option>
-              <option v-for="role in editAvailableRoles" :key="role.id" :value="role.id">
-                {{ role.name }}
-              </option>
-            </select>
-          </div>
+        <div class="test-form-field">
+          <label>Кому назначен тест</label>
+          <AssignmentPicker v-model="editForm.assignments" :restaurants="restaurants" />
         </div>
 
         <div v-for="(question, qIdx) in editForm.questions" :key="qIdx" class="test-question-card">
@@ -908,25 +890,9 @@ onMounted(async () => {
         <label>Описание (необязательно)</label>
         <input v-model="wordPreview.description" class="test-question-input" />
       </div>
-      <div class="test-form-grid" style="margin-bottom: 8px">
-        <div class="test-form-field">
-          <label>Ресторан</label>
-          <select v-model="wordPreview.restaurant_id" @change="onWordPreviewRestaurantChange" required>
-            <option value="" disabled>Выберите ресторан</option>
-            <option v-for="restaurant in restaurants" :key="restaurant.id" :value="restaurant.id">
-              {{ restaurant.name }}
-            </option>
-          </select>
-        </div>
-        <div class="test-form-field">
-          <label>Роль</label>
-          <select v-model="wordPreview.job_title_id" required>
-            <option value="" disabled>Выберите роль</option>
-            <option v-for="role in wordPreviewRoles" :key="role.id" :value="role.id">
-              {{ role.name }}
-            </option>
-          </select>
-        </div>
+      <div class="test-form-field" style="margin-bottom: 8px">
+        <label>Кому назначить тест</label>
+        <AssignmentPicker v-model="wordPreview.assignments" :restaurants="restaurants" />
       </div>
 
       <h4 style="margin: 12px 0 8px 0">Вопросы</h4>
@@ -1034,6 +1000,19 @@ onMounted(async () => {
           Сохранить в базу
         </button>
       </div>
+    </div>
+  </div>
+
+  <div v-if="catalogModalOpen" class="modal-backdrop" @click.self="closeCatalogModal">
+    <div class="card modal-card">
+      <div class="actions-row">
+        <h3 style="margin: 0">Управление ресторанами и ролями</h3>
+        <button type="button" class="ghost" @click="closeCatalogModal">Закрыть</button>
+      </div>
+      <p class="muted" style="margin-top: 0">
+        Создавайте и удаляйте рестораны, добавляйте к ним роли (должности) — затем назначайте на них тесты галочками.
+      </p>
+      <RestaurantRolesManager @changed="onCatalogChanged" />
     </div>
   </div>
 </template>

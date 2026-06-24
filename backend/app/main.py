@@ -70,6 +70,20 @@ def _run_startup() -> None:
                 "ON quiz_tests (external_code) WHERE external_code IS NOT NULL"
             )
         )
+        # Мульти-привязка тестов: перенести существующую одиночную пару (ресторан, роль)
+        # из quiz_tests в таблицу quiz_test_assignments (саму таблицу создаёт create_all).
+        connection.execute(
+            text(
+                "INSERT INTO quiz_test_assignments (test_id, restaurant_id, job_title_id, created_at) "
+                "SELECT t.id, t.restaurant_id, t.job_title_id, NOW() "
+                "FROM quiz_tests t "
+                "WHERE t.restaurant_id IS NOT NULL AND t.job_title_id IS NOT NULL "
+                "AND NOT EXISTS ("
+                "  SELECT 1 FROM quiz_test_assignments a "
+                "  WHERE a.test_id = t.id AND a.restaurant_id = t.restaurant_id AND a.job_title_id = t.job_title_id"
+                ")"
+            )
+        )
         connection.execute(text("ALTER TABLE menu_dishes ADD COLUMN IF NOT EXISTS restaurant_id UUID"))
         connection.execute(
             text(

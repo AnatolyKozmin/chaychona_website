@@ -2,12 +2,12 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.models.checklist import Checklist, ChecklistCompletion, ChecklistItem
-from app.models.quiz import QuizAttempt, QuizTest
+from app.models.quiz import QuizAttempt, QuizTest, QuizTestAssignment
 from app.core.security import get_password_hash
 from app.db.session import get_db
 from app.models.user import (
@@ -341,6 +341,91 @@ def create_restaurant(
     return item
 
 
+@router.put("/catalog/restaurants/{restaurant_id}", response_model=CatalogItemPublic)
+def update_restaurant(
+    restaurant_id: UUID,
+    payload: CatalogItemCreate,
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    restaurant = db.get(RestaurantCatalog, restaurant_id)
+    if not restaurant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ресторан не найден")
+
+    name = payload.name.strip()
+    existing = db.scalar(
+        select(RestaurantCatalog).where(
+            RestaurantCatalog.id != restaurant_id,
+            func.lower(RestaurantCatalog.name) == name.lower(),
+        )
+    )
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ресторан с этим названием уже существует")
+
+    old_name = restaurant.name
+    restaurant.name = name
+
+    if old_name.strip().lower() != name.lower():
+        # User.restaurant / RegistrationRequest.restaurant store the name, not a foreign key —
+        # keep them in sync so dashboard stats and learner profiles don't go stale on rename.
+        db.execute(update(User).where(func.lower(User.restaurant) == old_name.strip().lower()).values(restaurant=name))
+        db.execute(
+            update(RegistrationRequest)
+            .where(func.lower(RegistrationRequest.restaurant) == old_name.strip().lower())
+            .values(restaurant=name)
+        )
+
+    db.commit()
+    db.refresh(restaurant)
+    return restaurant
+
+
+@router.delete("/catalog/restaurants/{restaurant_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_restaurant(
+    restaurant_id: UUID,
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    restaurant = db.get(RestaurantCatalog, restaurant_id)
+    if not restaurant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ресторан не найден")
+
+    name_lower = restaurant.name.strip().lower()
+    users_count = db.scalar(
+        select(func.count())
+        .select_from(User)
+        .where(func.lower(func.coalesce(User.restaurant, "")) == name_lower)
+    )
+    assigned_test_ids = set(
+        db.scalars(select(QuizTestAssignment.test_id).where(QuizTestAssignment.restaurant_id == restaurant_id)).all()
+    )
+    primary_test_ids = set(
+        db.scalars(select(QuizTest.id).where(QuizTest.restaurant_id == restaurant_id)).all()
+    )
+    tests_count = len(assigned_test_ids | primary_test_ids)
+
+    if users_count or tests_count:
+        parts: list[str] = []
+        if tests_count:
+            parts.append(f"тестов: {tests_count}")
+        if users_count:
+            parts.append(f"пользователей: {users_count}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Нельзя удалить ресторан, к нему привязаны " + ", ".join(parts)
+                + ". Сначала открепите или удалите их."
+            ),
+        )
+
+    # Связанных тестов/пользователей нет — удаляем сам ресторан и его роли (они без него бессмысленны).
+    job_titles = list(db.scalars(select(JobTitleCatalog).where(JobTitleCatalog.restaurant_id == restaurant_id)).all())
+    for job_title in job_titles:
+        db.delete(job_title)
+    db.delete(restaurant)
+    db.commit()
+
+
 @router.get("/catalog/job-titles", response_model=list[CatalogItemPublic])
 def list_job_titles(
     restaurant_id: UUID | None = None,
@@ -377,6 +462,49 @@ def create_job_title(
     db.commit()
     db.refresh(item)
     return item
+
+
+@router.delete("/catalog/job-titles/{job_title_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_job_title(
+    job_title_id: UUID,
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    job_title = db.get(JobTitleCatalog, job_title_id)
+    if not job_title:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Роль не найдена")
+
+    restaurant = db.get(RestaurantCatalog, job_title.restaurant_id) if job_title.restaurant_id else None
+
+    assigned_test_ids = set(
+        db.scalars(select(QuizTestAssignment.test_id).where(QuizTestAssignment.job_title_id == job_title_id)).all()
+    )
+    primary_test_ids = set(
+        db.scalars(select(QuizTest.id).where(QuizTest.job_title_id == job_title_id)).all()
+    )
+    tests_count = len(assigned_test_ids | primary_test_ids)
+
+    user_filters = [func.lower(func.coalesce(User.job_title, "")) == job_title.name.strip().lower()]
+    if restaurant:
+        user_filters.append(func.lower(func.coalesce(User.restaurant, "")) == restaurant.name.strip().lower())
+    users_count = db.scalar(select(func.count()).select_from(User).where(*user_filters))
+
+    if users_count or tests_count:
+        parts: list[str] = []
+        if tests_count:
+            parts.append(f"тестов: {tests_count}")
+        if users_count:
+            parts.append(f"пользователей: {users_count}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Нельзя удалить роль, к ней привязаны " + ", ".join(parts)
+                + ". Сначала открепите или удалите их."
+            ),
+        )
+
+    db.delete(job_title)
+    db.commit()
 
 
 @router.get("/catalog/restaurants-with-roles", response_model=list[RestaurantWithRolesPublic])

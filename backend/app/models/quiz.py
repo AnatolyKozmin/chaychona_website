@@ -2,7 +2,8 @@ import enum
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -24,6 +25,30 @@ class QuizTest(Base):
     job_title_id: Mapped[UUID] = mapped_column(ForeignKey("job_title_catalog.id"), nullable=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_by_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class QuizTestAssignment(Base):
+    """Кому назначен тест: одна строка на пару (ресторан, роль).
+
+    Один тест можно назначить на несколько ресторанов и ролей.
+    Для обратной совместимости «первая» пара дублируется в
+    QuizTest.restaurant_id / QuizTest.job_title_id.
+    """
+
+    __tablename__ = "quiz_test_assignments"
+    __table_args__ = (
+        UniqueConstraint("test_id", "restaurant_id", "job_title_id", name="uq_quiz_test_assignment"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    test_id: Mapped[int] = mapped_column(ForeignKey("quiz_tests.id"), nullable=False, index=True)
+    restaurant_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("restaurant_catalog.id"), nullable=False, index=True
+    )
+    job_title_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("job_title_catalog.id"), nullable=False, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 

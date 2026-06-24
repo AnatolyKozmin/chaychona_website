@@ -13,7 +13,15 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_roles
 from app.db.session import get_db
 from app.word_tests_import import parse_docx_to_questions
-from app.models.quiz import QuestionType, QuizAttempt, QuizAttemptAnswer, QuizOption, QuizQuestion, QuizTest
+from app.models.quiz import (
+    QuestionType,
+    QuizAttempt,
+    QuizAttemptAnswer,
+    QuizOption,
+    QuizQuestion,
+    QuizTest,
+    QuizTestAssignment,
+)
 from app.models.user import JobTitleCatalog, RestaurantCatalog, Role, User
 from app.schemas.quiz import (
     QuizAnalyticsResponse,
@@ -28,6 +36,7 @@ from app.schemas.quiz import (
     QuizQuestionPublic,
     QuizSubmitRequest,
     QuizSubmitResultPublic,
+    QuizTestAssignmentPublic,
     QuizTestTakePublic,
     QuizTestCreate,
     QuizTestPublic,
@@ -106,15 +115,66 @@ def _validate_restaurant_role(
     return restaurant, job_title
 
 
+def _resolve_assignments(
+    db: Session,
+    payload: QuizTestCreate,
+) -> list[tuple[RestaurantCatalog, JobTitleCatalog]]:
+    """Собрать пары (ресторан, роль) из payload.assignments или из одиночных полей (legacy).
+
+    Возвращает провалидированный список без дубликатов, сохраняя порядок.
+    Первый элемент используется как «первичная» пара теста.
+    """
+    raw_pairs: list[tuple[str, str]] = []
+    if payload.assignments:
+        raw_pairs = [(a.restaurant_id, a.job_title_id) for a in payload.assignments]
+    elif payload.restaurant_id and payload.job_title_id:
+        raw_pairs = [(payload.restaurant_id, payload.job_title_id)]
+
+    if not raw_pairs:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Выберите хотя бы одну пару «ресторан + роль»",
+        )
+
+    resolved: list[tuple[RestaurantCatalog, JobTitleCatalog]] = []
+    seen: set[tuple[UUID, UUID]] = set()
+    for restaurant_id_raw, job_title_id_raw in raw_pairs:
+        restaurant_id = _parse_uuid_or_400(restaurant_id_raw, "id ресторана")
+        job_title_id = _parse_uuid_or_400(job_title_id_raw, "id роли")
+        key = (restaurant_id, job_title_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        resolved.append(_validate_restaurant_role(db, restaurant_id, job_title_id))
+    return resolved
+
+
+def _sync_test_assignments(
+    db: Session,
+    test: QuizTest,
+    pairs: list[tuple[RestaurantCatalog, JobTitleCatalog]],
+) -> None:
+    """Привести строки quiz_test_assignments в соответствие со списком pairs."""
+    wanted = {(restaurant.id, job_title.id) for restaurant, job_title in pairs}
+    existing = list(db.scalars(select(QuizTestAssignment).where(QuizTestAssignment.test_id == test.id)).all())
+    existing_keys = {(a.restaurant_id, a.job_title_id) for a in existing}
+
+    for assignment in existing:
+        if (assignment.restaurant_id, assignment.job_title_id) not in wanted:
+            db.delete(assignment)
+    for restaurant, job_title in pairs:
+        if (restaurant.id, job_title.id) not in existing_keys:
+            db.add(QuizTestAssignment(test_id=test.id, restaurant_id=restaurant.id, job_title_id=job_title.id))
+
+
 def _upsert_test(
     db: Session,
     payload: QuizTestCreate,
     created_by_user_id: UUID,
     existing_test: QuizTest | None = None,
 ) -> tuple[QuizTest, str]:
-    restaurant_id = _parse_uuid_or_400(payload.restaurant_id, "id ресторана")
-    job_title_id = _parse_uuid_or_400(payload.job_title_id, "id роли")
-    restaurant, job_title = _validate_restaurant_role(db, restaurant_id, job_title_id)
+    pairs = _resolve_assignments(db, payload)
+    primary_restaurant, primary_job_title = pairs[0]
     _validate_questions(payload)
 
     external_code = payload.external_code.strip() if payload.external_code else None
@@ -128,8 +188,8 @@ def _upsert_test(
     test.external_code = external_code
     test.title = payload.title.strip()
     test.description = payload.description.strip() if payload.description else None
-    test.restaurant_id = restaurant.id
-    test.job_title_id = job_title.id
+    test.restaurant_id = primary_restaurant.id
+    test.job_title_id = primary_job_title.id
 
     if existing_test is None:
         db.add(test)
@@ -162,6 +222,8 @@ def _upsert_test(
                     sort_order=o_idx,
                 )
             )
+
+    _sync_test_assignments(db, test, pairs)
     return test, mode
 
 
@@ -217,6 +279,10 @@ def delete_test(
             db.delete(option)
         db.delete(question)
 
+    assignments = list(db.scalars(select(QuizTestAssignment).where(QuizTestAssignment.test_id == test.id)).all())
+    for assignment in assignments:
+        db.delete(assignment)
+
     db.delete(test)
     db.commit()
 
@@ -230,10 +296,19 @@ def list_tests(
 ):
     query = select(QuizTest).order_by(QuizTest.created_at.desc())
     try:
-        if restaurant_id:
-            query = query.where(QuizTest.restaurant_id == UUID(restaurant_id))
-        if job_title_id:
-            query = query.where(QuizTest.job_title_id == UUID(job_title_id))
+        if restaurant_id or job_title_id:
+            # Фильтр по таблице привязок: тест попадает в выборку, если у него
+            # есть пара (ресторан, роль), удовлетворяющая фильтру.
+            assignment_filter = select(QuizTestAssignment.test_id)
+            if restaurant_id:
+                assignment_filter = assignment_filter.where(
+                    QuizTestAssignment.restaurant_id == UUID(restaurant_id)
+                )
+            if job_title_id:
+                assignment_filter = assignment_filter.where(
+                    QuizTestAssignment.job_title_id == UUID(job_title_id)
+                )
+            query = query.where(QuizTest.id.in_(assignment_filter))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный фильтр ресторана/роли") from exc
 
@@ -254,12 +329,21 @@ def _query_tests_for_user(db: Session, user: User) -> list[QuizTest]:
     tests = list(db.scalars(query).all())
     matched: list[QuizTest] = []
     for test in tests:
-        restaurant = db.get(RestaurantCatalog, test.restaurant_id)
-        job_title = db.get(JobTitleCatalog, test.job_title_id)
-        if not restaurant or not job_title:
-            continue
-        if _normalize_text(restaurant.name) == user_restaurant and _normalize_text(job_title.name) == user_job_title:
-            matched.append(test)
+        # Тест доступен, если ХОТЯ БЫ ОДНА его пара (ресторан, роль) совпадает с профилем.
+        assignments = list(
+            db.scalars(select(QuizTestAssignment).where(QuizTestAssignment.test_id == test.id)).all()
+        )
+        for assignment in assignments:
+            restaurant = db.get(RestaurantCatalog, assignment.restaurant_id)
+            job_title = db.get(JobTitleCatalog, assignment.job_title_id)
+            if not restaurant or not job_title:
+                continue
+            if (
+                _normalize_text(restaurant.name) == user_restaurant
+                and _normalize_text(job_title.name) == user_job_title
+            ):
+                matched.append(test)
+                break
     return matched
 
 
@@ -1007,6 +1091,24 @@ def _build_test_public(db: Session, test_id: int) -> QuizTestPublic:
     restaurant = db.get(RestaurantCatalog, test.restaurant_id)
     job_title = db.get(JobTitleCatalog, test.job_title_id)
 
+    assignment_rows = list(
+        db.scalars(select(QuizTestAssignment).where(QuizTestAssignment.test_id == test.id)).all()
+    )
+    assignments: list[QuizTestAssignmentPublic] = []
+    for row in assignment_rows:
+        a_restaurant = db.get(RestaurantCatalog, row.restaurant_id)
+        a_job_title = db.get(JobTitleCatalog, row.job_title_id)
+        if not a_restaurant or not a_job_title:
+            continue
+        assignments.append(
+            QuizTestAssignmentPublic(
+                restaurant_id=str(row.restaurant_id),
+                restaurant_name=a_restaurant.name,
+                job_title_id=str(row.job_title_id),
+                job_title_name=a_job_title.name,
+            )
+        )
+
     questions = list(db.scalars(select(QuizQuestion).where(QuizQuestion.test_id == test.id).order_by(QuizQuestion.sort_order.asc())).all())
     question_public: list[QuizQuestionPublic] = []
     for question in questions:
@@ -1036,6 +1138,7 @@ def _build_test_public(db: Session, test_id: int) -> QuizTestPublic:
         restaurant_name=restaurant.name if restaurant else "",
         job_title_id=str(test.job_title_id),
         job_title_name=job_title.name if job_title else "",
+        assignments=assignments,
         created_at=test.created_at,
         questions=question_public,
     )

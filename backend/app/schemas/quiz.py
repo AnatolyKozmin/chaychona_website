@@ -16,12 +16,19 @@ class QuizQuestionCreate(BaseModel):
     options: list[QuizOptionCreate] = Field(min_length=2)
 
 
+class QuizTestAssignmentInput(BaseModel):
+    restaurant_id: str
+    job_title_id: str
+
+
 class QuizTestCreate(BaseModel):
     external_code: str | None = Field(default=None, min_length=1, max_length=120)
     title: str = Field(min_length=2, max_length=255)
     description: str | None = Field(default=None, max_length=5000)
-    restaurant_id: str
-    job_title_id: str
+    # Одиночная пара (legacy, импорт Excel/Word) ИЛИ список assignments — нужно хотя бы одно.
+    restaurant_id: str | None = None
+    job_title_id: str | None = None
+    assignments: list[QuizTestAssignmentInput] = Field(default_factory=list)
     questions: list[QuizQuestionCreate] = Field(min_length=1)
 
 
@@ -42,15 +49,25 @@ class QuizQuestionPublic(BaseModel):
     options: list[QuizOptionPublic]
 
 
+class QuizTestAssignmentPublic(BaseModel):
+    restaurant_id: str
+    restaurant_name: str
+    job_title_id: str
+    job_title_name: str
+
+
 class QuizTestPublic(BaseModel):
     id: int
     external_code: str | None
     title: str
     description: str | None
+    # Первичная пара (для обратной совместимости со списком/прохождением/аналитикой).
     restaurant_id: str
     restaurant_name: str
     job_title_id: str
     job_title_name: str
+    # Все пары, на которые назначен тест.
+    assignments: list[QuizTestAssignmentPublic]
     created_at: datetime
     questions: list[QuizQuestionPublic]
 
