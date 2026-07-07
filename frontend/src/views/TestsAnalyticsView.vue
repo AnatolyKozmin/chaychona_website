@@ -61,7 +61,7 @@ interface AnalyticsResponse {
 interface AttemptDetail {
   attempt: AttemptItem;
   results: Array<{
-    question_id: number;
+    question_id: number | null;
     question_text: string;
     selected_options: string[];
     correct_options: string[];
@@ -69,11 +69,47 @@ interface AttemptDetail {
   }>;
 }
 
+interface ScoreboardTestRef {
+  id: number;
+  title: string;
+}
+
+interface ScoreboardCell {
+  test_id: number;
+  attempts_count: number;
+  best_correct: number;
+  best_total: number;
+  best_percent: number;
+  last_correct: number;
+  last_total: number;
+  last_percent: number;
+  last_finished_at: string;
+}
+
+interface ScoreboardUser {
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  user_restaurant: string | null;
+  user_job_title: string | null;
+  scores: ScoreboardCell[];
+}
+
+interface ScoreboardResponse {
+  tests: ScoreboardTestRef[];
+  users: ScoreboardUser[];
+}
+
 const route = useRoute();
 const auth = useAuthStore();
 const loading = ref(false);
 const error = ref("");
 const analytics = ref<AnalyticsResponse | null>(null);
+const scoreboard = ref<ScoreboardResponse | null>(null);
+const scoreMode = ref<"best" | "last">("best");
+const scoreFilterUser = ref("");
+const scoreFilterRestaurant = ref("");
+const scoreFilterRole = ref("");
 const detailLoading = ref(false);
 const detailOpen = ref(false);
 const selectedAttempt = ref<AttemptDetail | null>(null);
@@ -106,6 +142,61 @@ const availableRoles = computed(() => {
   return [...new Set(source.map((item) => item.user_job_title || "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
 });
 
+const scoreboardRestaurants = computed(() => {
+  const source = scoreboard.value?.users ?? [];
+  return [...new Set(source.map((u) => u.user_restaurant || "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
+});
+
+const scoreboardRoles = computed(() => {
+  const source = scoreboard.value?.users ?? [];
+  return [...new Set(source.map((u) => u.user_job_title || "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
+});
+
+const filteredScoreboardUsers = computed(() => {
+  const source = scoreboard.value?.users ?? [];
+  const nameQuery = scoreFilterUser.value.trim().toLowerCase();
+  return source.filter((u) => {
+    const matchesRestaurant = !scoreFilterRestaurant.value || (u.user_restaurant || "") === scoreFilterRestaurant.value;
+    const matchesRole = !scoreFilterRole.value || (u.user_job_title || "") === scoreFilterRole.value;
+    const haystack = `${u.user_name} ${u.user_email}`.toLowerCase();
+    const matchesUser = !nameQuery || haystack.includes(nameQuery);
+    return matchesRestaurant && matchesRole && matchesUser;
+  });
+});
+
+/** Тесты-колонки: если фильтры сузили список людей, пустые колонки убираем. */
+const visibleScoreboardTests = computed(() => {
+  const tests = scoreboard.value?.tests ?? [];
+  const users = filteredScoreboardUsers.value;
+  const takenTestIds = new Set(users.flatMap((u) => u.scores.map((s) => s.test_id)));
+  return tests.filter((t) => takenTestIds.has(t.id));
+});
+
+function scoreboardCell(user: ScoreboardUser, testId: number): ScoreboardCell | null {
+  return user.scores.find((s) => s.test_id === testId) ?? null;
+}
+
+function cellPercent(cell: ScoreboardCell): number {
+  return scoreMode.value === "best" ? cell.best_percent : cell.last_percent;
+}
+
+function cellScoreText(cell: ScoreboardCell): string {
+  return scoreMode.value === "best"
+    ? `${cell.best_correct}/${cell.best_total}`
+    : `${cell.last_correct}/${cell.last_total}`;
+}
+
+function scoreCellClass(cell: ScoreboardCell): string {
+  const p = cellPercent(cell);
+  if (p >= 80) {
+    return "score-cell--good";
+  }
+  if (p >= 50) {
+    return "score-cell--mid";
+  }
+  return "score-cell--bad";
+}
+
 const filteredAttempts = computed(() => {
   const source = analytics.value?.attempts ?? [];
   const nameQuery = filterUser.value.trim().toLowerCase();
@@ -122,16 +213,21 @@ async function loadAnalytics() {
   loading.value = true;
   error.value = "";
   try {
-    const { data } = await api.get<AnalyticsResponse>("/tests/analytics", {
-      params: {
-        limit_recent: 5,
-        attempts_limit: 500
-      }
-    });
-    analytics.value = data;
+    const [analyticsResp, scoreboardResp] = await Promise.all([
+      api.get<AnalyticsResponse>("/tests/analytics", {
+        params: {
+          limit_recent: 5,
+          attempts_limit: 500
+        }
+      }),
+      api.get<ScoreboardResponse>("/tests/scoreboard")
+    ]);
+    analytics.value = analyticsResp.data;
+    scoreboard.value = scoreboardResp.data;
     filterRestaurant.value = "";
     filterRole.value = "";
     filterUser.value = (route.query.user as string) || "";
+    scoreFilterUser.value = (route.query.user as string) || "";
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "Не удалось загрузить аналитику";
   } finally {
@@ -186,6 +282,98 @@ onMounted(async () => {
         <p v-if="analytics.summary.avg_duration_seconds !== null">
           <strong>Среднее время:</strong> {{ analytics.summary.avg_duration_seconds.toFixed(1) }} сек.
         </p>
+      </div>
+
+      <div class="card">
+        <div class="actions-row" style="flex-wrap: wrap; gap: 10px">
+          <h3 style="margin: 0">Баллы по тестам</h3>
+          <div class="score-mode-toggle">
+            <button
+              type="button"
+              class="score-mode-btn"
+              :class="{ 'score-mode-btn--active': scoreMode === 'best' }"
+              @click="scoreMode = 'best'"
+            >
+              Лучший результат
+            </button>
+            <button
+              type="button"
+              class="score-mode-btn"
+              :class="{ 'score-mode-btn--active': scoreMode === 'last' }"
+              @click="scoreMode = 'last'"
+            >
+              Последний результат
+            </button>
+          </div>
+        </div>
+        <p class="muted" style="margin: 8px 0 12px 0">
+          Все сотрудники и их баллы по каждому тесту в одной таблице. Наведите на ячейку, чтобы увидеть число попыток и дату.
+        </p>
+        <div class="analytics-filters">
+          <div>
+            <label>Ресторан</label>
+            <select v-model="scoreFilterRestaurant">
+              <option value="">Все рестораны</option>
+              <option v-for="item in scoreboardRestaurants" :key="item" :value="item">{{ item }}</option>
+            </select>
+          </div>
+          <div>
+            <label>Роль</label>
+            <select v-model="scoreFilterRole">
+              <option value="">Все роли</option>
+              <option v-for="item in scoreboardRoles" :key="item" :value="item">{{ item }}</option>
+            </select>
+          </div>
+          <div>
+            <label>Имя или email</label>
+            <input v-model="scoreFilterUser" placeholder="Введите имя или email" />
+          </div>
+        </div>
+        <p v-if="!scoreboard || scoreboard.users.length === 0" class="muted">Пока никто не проходил тесты.</p>
+        <p v-else-if="filteredScoreboardUsers.length === 0" class="muted">По выбранным фильтрам нет данных.</p>
+        <div v-else class="table-wrap">
+          <table class="scoreboard-table">
+            <thead>
+              <tr>
+                <th class="scoreboard-user-col">Сотрудник</th>
+                <th v-for="test in visibleScoreboardTests" :key="test.id" class="scoreboard-test-col">
+                  {{ test.title }}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="user in filteredScoreboardUsers" :key="user.user_id">
+                <td class="scoreboard-user-col">
+                  <div>{{ user.user_name }}</div>
+                  <div class="muted" style="font-size: 12px">{{ user.user_email }}</div>
+                  <div class="muted" style="font-size: 12px">
+                    {{ user.user_restaurant || "-" }} · {{ user.user_job_title || "-" }}
+                  </div>
+                </td>
+                <td
+                  v-for="test in visibleScoreboardTests"
+                  :key="test.id"
+                  class="score-cell"
+                >
+                  <template v-if="scoreboardCell(user, test.id)">
+                    <span
+                      class="score-badge"
+                      :class="scoreCellClass(scoreboardCell(user, test.id)!)"
+                      :title="`Попыток: ${scoreboardCell(user, test.id)!.attempts_count}, последняя: ${formatDate(scoreboardCell(user, test.id)!.last_finished_at)}`"
+                    >
+                      {{ cellScoreText(scoreboardCell(user, test.id)!) }}
+                      <span class="score-badge-percent">{{ cellPercent(scoreboardCell(user, test.id)!).toFixed(0) }}%</span>
+                    </span>
+                    <span v-if="scoreboardCell(user, test.id)!.attempts_count > 1" class="muted score-attempts">
+                      ×{{ scoreboardCell(user, test.id)!.attempts_count }}
+                    </span>
+                  </template>
+                  <span v-else class="muted">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div class="card">
@@ -376,8 +564,8 @@ onMounted(async () => {
 
         <div class="attempt-result-list">
           <div
-            v-for="item in selectedAttempt.results"
-            :key="item.question_id"
+            v-for="(item, itemIdx) in selectedAttempt.results"
+            :key="itemIdx"
             class="test-result-card"
             :class="item.is_correct ? 'test-result-card--correct' : 'test-result-card--incorrect'"
           >

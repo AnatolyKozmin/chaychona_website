@@ -34,6 +34,10 @@ from app.schemas.quiz import (
     QuizQuestionResultPublic,
     QuizQuestionTakePublic,
     QuizQuestionPublic,
+    QuizScoreboardCell,
+    QuizScoreboardResponse,
+    QuizScoreboardTestRef,
+    QuizScoreboardUser,
     QuizSubmitRequest,
     QuizSubmitResultPublic,
     QuizTestAssignmentPublic,
@@ -477,6 +481,79 @@ def get_my_attempt_detail(
     )
 
 
+@router.get("/scoreboard", response_model=QuizScoreboardResponse)
+def tests_scoreboard(
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Сводная таблица баллов: по каждому пользователю — лучший и последний
+    результат по каждому тесту, который он проходил."""
+    attempts = list(db.scalars(select(QuizAttempt).order_by(QuizAttempt.finished_at.asc())).all())
+
+    def percent(attempt: QuizAttempt) -> float:
+        if attempt.total_questions <= 0:
+            return 0.0
+        return attempt.correct_answers / attempt.total_questions * 100
+
+    # (user_id, test_id) -> {"best": QuizAttempt, "last": QuizAttempt, "count": int}
+    buckets: dict[tuple[UUID, int], dict] = {}
+    for attempt in attempts:
+        key = (attempt.user_id, attempt.test_id)
+        bucket = buckets.setdefault(key, {"best": attempt, "last": attempt, "count": 0})
+        bucket["count"] += 1
+        bucket["last"] = attempt  # список отсортирован по finished_at asc
+        if percent(attempt) > percent(bucket["best"]):
+            bucket["best"] = attempt
+
+    test_ids = {test_id for _, test_id in buckets}
+    tests_by_id = {test_id: db.get(QuizTest, test_id) for test_id in test_ids}
+    test_refs = sorted(
+        (
+            QuizScoreboardTestRef(id=test_id, title=test.title)
+            for test_id, test in tests_by_id.items()
+            if test
+        ),
+        key=lambda item: item.title.lower(),
+    )
+
+    users_cells: dict[UUID, list[QuizScoreboardCell]] = {}
+    for (user_id, test_id), bucket in buckets.items():
+        if not tests_by_id.get(test_id):
+            continue
+        best: QuizAttempt = bucket["best"]
+        last: QuizAttempt = bucket["last"]
+        users_cells.setdefault(user_id, []).append(
+            QuizScoreboardCell(
+                test_id=test_id,
+                attempts_count=bucket["count"],
+                best_correct=best.correct_answers,
+                best_total=best.total_questions,
+                best_percent=percent(best),
+                last_correct=last.correct_answers,
+                last_total=last.total_questions,
+                last_percent=percent(last),
+                last_finished_at=last.finished_at,
+            )
+        )
+
+    scoreboard_users: list[QuizScoreboardUser] = []
+    for user_id, cells in users_cells.items():
+        user = db.get(User, user_id)
+        scoreboard_users.append(
+            QuizScoreboardUser(
+                user_id=str(user_id),
+                user_name=user.full_name if user else "",
+                user_email=user.email if user else "",
+                user_restaurant=user.restaurant if user else None,
+                user_job_title=user.job_title if user else None,
+                scores=cells,
+            )
+        )
+    scoreboard_users.sort(key=lambda item: item.user_name.lower())
+
+    return QuizScoreboardResponse(tests=test_refs, users=scoreboard_users)
+
+
 @router.get("/analytics", response_model=QuizAnalyticsResponse)
 def tests_analytics(
     limit_recent: int = Query(default=5, ge=1, le=50),
@@ -505,6 +582,8 @@ def tests_analytics(
 
     question_buckets: dict[int, dict] = {}
     for answer in answers:
+        if answer.question_id is None:
+            continue
         bucket = question_buckets.setdefault(
             answer.question_id,
             {
@@ -1026,7 +1105,11 @@ async def parse_docx_preview(
     file: UploadFile = File(...),
     _: User = Depends(require_roles(Role.SUPERADMIN)),
 ):
-    """Только разбор .docx без записи в БД — для предпросмотра и правок на фронте."""
+    """Только разбор .docx без записи в БД — для предпросмотра и правок на фронте.
+
+    Лояльный режим: проблемные вопросы не блокируют разбор, а возвращаются
+    вместе с предупреждениями — их правят в предпросмотре перед сохранением.
+    """
     name = (file.filename or "").lower()
     if not name.endswith(".docx"):
         raise HTTPException(
@@ -1037,11 +1120,11 @@ async def parse_docx_preview(
     if not content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пустой")
 
-    questions, errors = parse_docx_to_questions(content)
-    if errors:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=errors)
+    questions, warnings = parse_docx_to_questions(content, strict=False)
+    if not questions:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=warnings)
 
-    return {"questions": questions}
+    return {"questions": questions, "warnings": warnings}
 
 @router.post("/import-apply")
 def import_apply_test_payload(

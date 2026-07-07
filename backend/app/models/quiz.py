@@ -94,7 +94,11 @@ class QuizAttemptAnswer(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     attempt_id: Mapped[int] = mapped_column(ForeignKey("quiz_attempts.id"), nullable=False, index=True)
-    question_id: Mapped[int] = mapped_column(ForeignKey("quiz_questions.id"), nullable=False, index=True)
+    # Вопрос может быть удалён при обновлении теста — история попытки сохраняется
+    # за счёт дублированных текстов (question_text, *_options_text).
+    question_id: Mapped[int | None] = mapped_column(
+        ForeignKey("quiz_questions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     question_text: Mapped[str] = mapped_column(Text, nullable=False)
     selected_option_ids: Mapped[str] = mapped_column(Text, nullable=False, default="")
     selected_options_text: Mapped[str] = mapped_column(Text, nullable=False, default="")

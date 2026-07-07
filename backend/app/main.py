@@ -84,6 +84,29 @@ def _run_startup() -> None:
                 ")"
             )
         )
+        # Ответы попыток не должны блокировать обновление теста: вопрос может быть
+        # пересоздан, ссылка обнуляется, история хранится в текстовых полях ответа.
+        connection.execute(text("ALTER TABLE quiz_attempt_answers ALTER COLUMN question_id DROP NOT NULL"))
+        connection.execute(
+            text(
+                "DO $$ "
+                "BEGIN "
+                "IF EXISTS ("
+                "  SELECT 1 FROM pg_constraint "
+                "  WHERE conname = 'quiz_attempt_answers_question_id_fkey' AND confdeltype <> 'n'"
+                ") THEN "
+                "ALTER TABLE quiz_attempt_answers DROP CONSTRAINT quiz_attempt_answers_question_id_fkey; "
+                "END IF; "
+                "IF NOT EXISTS ("
+                "  SELECT 1 FROM pg_constraint WHERE conname = 'quiz_attempt_answers_question_id_fkey'"
+                ") THEN "
+                "ALTER TABLE quiz_attempt_answers "
+                "ADD CONSTRAINT quiz_attempt_answers_question_id_fkey "
+                "FOREIGN KEY (question_id) REFERENCES quiz_questions (id) ON DELETE SET NULL; "
+                "END IF; "
+                "END $$;"
+            )
+        )
         connection.execute(text("ALTER TABLE menu_dishes ADD COLUMN IF NOT EXISTS restaurant_id UUID"))
         connection.execute(
             text(

@@ -501,6 +501,224 @@ tr:hover td {
   border-color: #dce7ff;
 }
 
+/* Вкладки способов внесения теста */
+.create-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0;
+  border-bottom: 1px solid #e8edf5;
+  padding-bottom: 0;
+}
+
+.create-tab {
+  width: auto;
+  margin: 0;
+  padding: 10px 18px;
+  background: transparent;
+  color: #64748b;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 10px 10px 0 0;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.create-tab:hover {
+  background: #f1f5fb;
+  color: #334155;
+}
+
+.create-tab--active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+  background: #f5f8ff;
+  font-weight: 600;
+}
+
+/* Зона выбора/перетаскивания файла */
+.file-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 26px 16px;
+  margin-bottom: 14px;
+  border: 2px dashed #c4d3ef;
+  border-radius: 14px;
+  background: #fbfdff;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.file-drop:hover {
+  border-color: #2563eb;
+  background: #f5f8ff;
+}
+
+.file-drop--active {
+  border-color: #2563eb;
+  background: #eaf1ff;
+}
+
+.file-drop--filled {
+  border-style: solid;
+  border-color: #86b3f7;
+  background: #f2f7ff;
+}
+
+.file-drop-input {
+  display: none;
+}
+
+.file-drop-icon {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.file-drop-name {
+  font-weight: 600;
+  color: #334155;
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.import-optional summary {
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+}
+
+/* Предпросмотр импорта: сводка и предупреждения */
+.preview-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.preview-summary-issues {
+  background: #fdf0e4;
+  color: #b45309;
+}
+
+.preview-summary-ok {
+  background: #e5f6ec;
+  color: #15803d;
+}
+
+.warning-box {
+  background: #fff8ec;
+  border: 1px solid #f5d9a8;
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: #7c4a03;
+}
+
+.warning-box ul {
+  margin: 6px 0 0 0;
+  padding-left: 18px;
+}
+
+.test-question-card--issue {
+  border-color: #f0b357;
+  background: #fffaf2;
+}
+
+.test-question-issue-note {
+  margin: 0 0 10px 0;
+  font-size: 13px;
+  color: #b45309;
+}
+
+/* Сводная таблица баллов по тестам */
+.score-mode-toggle {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid #d0d8e5;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.score-mode-btn {
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 0;
+  background: #fff;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.score-mode-btn--active {
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+}
+
+.scoreboard-table .scoreboard-user-col {
+  position: sticky;
+  left: 0;
+  background: #fff;
+  min-width: 180px;
+  z-index: 1;
+}
+
+.scoreboard-table thead .scoreboard-user-col {
+  background: #f8faff;
+  z-index: 2;
+}
+
+.scoreboard-table .scoreboard-test-col {
+  min-width: 130px;
+  max-width: 220px;
+}
+
+.score-cell {
+  white-space: nowrap;
+}
+
+.score-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.score-badge-percent {
+  font-weight: 400;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.score-cell--good {
+  background: #e5f6ec;
+  color: #15803d;
+}
+
+.score-cell--mid {
+  background: #fdf3e0;
+  color: #b45309;
+}
+
+.score-cell--bad {
+  background: #fdeceb;
+  color: #b42318;
+}
+
+.score-attempts {
+  margin-left: 6px;
+  font-size: 12px;
+}
+
 .test-import-row {
   display: flex;
   flex-wrap: wrap;

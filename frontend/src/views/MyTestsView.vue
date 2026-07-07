@@ -73,7 +73,7 @@ interface AttemptItem {
 }
 
 interface AttemptQuestionDetail {
-  question_id: number;
+  question_id: number | null;
   question_text: string;
   selected_options: string[];
   correct_options: string[];
@@ -422,8 +422,8 @@ useBodyScrollLock(computed(() => attemptsModalOpen.value));
 
       <div class="attempt-result-list" style="margin-top: 10px">
         <div
-          v-for="item in selectedAttemptDetail.results"
-          :key="item.question_id"
+          v-for="(item, itemIdx) in selectedAttemptDetail.results"
+          :key="itemIdx"
           class="test-result-card"
           :class="item.is_correct ? 'test-result-card--correct' : 'test-result-card--incorrect'"
         >

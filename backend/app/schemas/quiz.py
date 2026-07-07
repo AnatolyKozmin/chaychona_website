@@ -142,7 +142,8 @@ class QuizAttemptPublic(BaseModel):
 
 
 class QuizAttemptQuestionDetailPublic(BaseModel):
-    question_id: int
+    # None, если вопрос был удалён/пересоздан после прохождения — тексты сохранены в ответе.
+    question_id: int | None
     question_text: str
     selected_options: list[str]
     correct_options: list[str]
@@ -181,6 +182,37 @@ class QuizAnalyticsSummary(BaseModel):
     unique_users: int
     avg_score_percent: float
     avg_duration_seconds: float | None
+
+
+class QuizScoreboardTestRef(BaseModel):
+    id: int
+    title: str
+
+
+class QuizScoreboardCell(BaseModel):
+    test_id: int
+    attempts_count: int
+    best_correct: int
+    best_total: int
+    best_percent: float
+    last_correct: int
+    last_total: int
+    last_percent: float
+    last_finished_at: datetime
+
+
+class QuizScoreboardUser(BaseModel):
+    user_id: str
+    user_name: str
+    user_email: str
+    user_restaurant: str | None
+    user_job_title: str | None
+    scores: list[QuizScoreboardCell]
+
+
+class QuizScoreboardResponse(BaseModel):
+    tests: list[QuizScoreboardTestRef]
+    users: list[QuizScoreboardUser]
 
 
 class QuizAnalyticsResponse(BaseModel):

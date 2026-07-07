@@ -48,7 +48,7 @@ interface AttemptItem {
 interface AttemptDetail {
   attempt: AttemptItem;
   results: Array<{
-    question_id: number;
+    question_id: number | null;
     question_text: string;
     selected_options: string[];
     correct_options: string[];
@@ -231,8 +231,8 @@ onMounted(async () => {
                       <p v-if="!attemptDetails[item.id]" class="muted">Загрузка деталей...</p>
                       <div v-else class="attempt-result-list">
                         <div
-                          v-for="res in attemptDetails[item.id].results"
-                          :key="res.question_id"
+                          v-for="(res, resIdx) in attemptDetails[item.id].results"
+                          :key="resIdx"
                           class="test-result-card"
                           :class="res.is_correct ? 'test-result-card--correct' : 'test-result-card--incorrect'"
                         >

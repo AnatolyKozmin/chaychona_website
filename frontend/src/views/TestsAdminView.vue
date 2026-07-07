@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/auth";
@@ -81,6 +81,15 @@ const importWordCode = ref("");
 const importWordTitle = ref("");
 const importWordDescription = ref("");
 const catalogModalOpen = ref(false);
+
+/** Способ внесения теста: вкладки */
+type CreateTab = "manual" | "word" | "excel";
+const createTab = ref<CreateTab>("word");
+const wordWarnings = ref<string[]>([]);
+const wordDragOver = ref(false);
+const excelDragOver = ref(false);
+const wordFileInput = ref<HTMLInputElement | null>(null);
+const excelFileInput = ref<HTMLInputElement | null>(null);
 
 /** Предпросмотр импорта из Word */
 const wordPreviewOpen = ref(false);
@@ -215,6 +224,84 @@ function onImportFileChange(event: Event) {
   importFile.value = target.files?.[0] ?? null;
 }
 
+function pickExcelFile() {
+  excelFileInput.value?.click();
+}
+
+function onExcelDrop(event: DragEvent) {
+  excelDragOver.value = false;
+  const file = event.dataTransfer?.files?.[0];
+  if (!file) {
+    return;
+  }
+  if (!file.name.toLowerCase().endsWith(".xlsx")) {
+    error.value = "Нужен файл Excel (.xlsx)";
+    return;
+  }
+  error.value = "";
+  importFile.value = file;
+}
+
+function pickWordFile() {
+  wordFileInput.value?.click();
+}
+
+function onWordDrop(event: DragEvent) {
+  wordDragOver.value = false;
+  const file = event.dataTransfer?.files?.[0];
+  if (!file) {
+    return;
+  }
+  if (!file.name.toLowerCase().endsWith(".docx")) {
+    error.value = "Нужен файл Word (.docx)";
+    return;
+  }
+  error.value = "";
+  importWordFile.value = file;
+}
+
+/** Код теста из имени файла: транслит + snake_case, чтобы поле можно было не заполнять. */
+function slugFromFilename(name: string): string {
+  const translit: Record<string, string> = {
+    а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i",
+    й: "i", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t",
+    у: "u", ф: "f", х: "h", ц: "c", ч: "ch", ш: "sh", щ: "sch", ъ: "", ы: "y", ь: "",
+    э: "e", ю: "yu", я: "ya"
+  };
+  const base = name.replace(/\.docx$/i, "").toLowerCase();
+  const slug = base
+    .split("")
+    .map((ch) => translit[ch] ?? ch)
+    .join("")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 60);
+  return slug || "test";
+}
+
+/** Проблемы вопроса для подсветки в предпросмотре (та же логика, что и валидация перед сохранением). */
+function questionIssues(question: TestQuestion): string[] {
+  const issues: string[] = [];
+  if (!question.text.trim()) {
+    issues.push("нет текста вопроса");
+  }
+  const filled = question.options.filter((o) => o.text.trim());
+  if (filled.length < 2) {
+    issues.push("нужно минимум 2 варианта ответа");
+  }
+  const correct = question.options.filter((o) => o.is_correct && o.text.trim());
+  if (correct.length < 1) {
+    issues.push("не отмечен правильный ответ");
+  } else if (question.question_type === "single" && correct.length !== 1) {
+    issues.push("для типа «один ответ» отметьте ровно один вариант");
+  }
+  return issues;
+}
+
+const wordPreviewIssueCount = computed(
+  () => wordPreview.questions.filter((q) => questionIssues(q).length > 0).length
+);
+
 async function uploadImportFile() {
   if (!importFile.value) {
     error.value = "Выберите Excel файл для загрузки";
@@ -229,8 +316,14 @@ async function uploadImportFile() {
     const { data } = await api.post("/tests/import-xlsx", formData, {
       params: { dry_run: importDryRun.value }
     });
-    importReport.value = `Файл обработан. Тестов в файле: ${data.tests_in_file}, создано: ${data.created}, обновлено: ${data.updated}, режим: ${data.dry_run ? "dry-run" : "apply"}.`;
+    importReport.value = data.dry_run
+      ? `Проверка пройдена. Тестов в файле: ${data.tests_in_file} (было бы создано: ${data.created}, обновлено: ${data.updated}). Снимите галочку проверки и загрузите ещё раз, чтобы сохранить.`
+      : `Готово. Тестов в файле: ${data.tests_in_file}, создано: ${data.created}, обновлено: ${data.updated}.`;
     if (!importDryRun.value) {
+      importFile.value = null;
+      if (excelFileInput.value) {
+        excelFileInput.value.value = "";
+      }
       await loadTests();
     }
   } catch (e: any) {
@@ -257,23 +350,24 @@ async function parseWordForPreview() {
     error.value = "Выберите файл Word (.docx)";
     return;
   }
-  if (!importWordCode.value.trim() || !importWordTitle.value.trim()) {
-    error.value = "Укажите код теста и название";
-    return;
-  }
   saving.value = true;
   error.value = "";
+  importReport.value = "";
   try {
     const formData = new FormData();
     formData.append("file", importWordFile.value);
-    const { data } = await api.post<{ questions: TestQuestion[] }>("/tests/parse-docx", formData);
-    wordPreview.title = importWordTitle.value.trim();
-    wordPreview.external_code = importWordCode.value.trim();
+    const { data } = await api.post<{ questions: TestQuestion[]; warnings?: string[] }>(
+      "/tests/parse-docx",
+      formData
+    );
+    const fileName = importWordFile.value.name;
+    wordPreview.title = importWordTitle.value.trim() || fileName.replace(/\.docx$/i, "").trim();
+    wordPreview.external_code = importWordCode.value.trim() || slugFromFilename(fileName);
     wordPreview.description = importWordDescription.value.trim();
-    wordPreview.assignments = [...form.assignments];
+    wordPreview.assignments = [];
     wordPreview.questions = cloneQuestions(data.questions);
+    wordWarnings.value = data.warnings ?? [];
     wordPreviewOpen.value = true;
-    importReport.value = `Разобрано вопросов: ${data.questions.length}. Проверьте и при необходимости отредактируйте.`;
   } catch (e: any) {
     const detail = e?.response?.data?.detail;
     if (Array.isArray(detail)) {
@@ -349,23 +443,9 @@ async function applyWordImport(dryRun: boolean) {
     return;
   }
   for (let i = 0; i < wordPreview.questions.length; i++) {
-    const q = wordPreview.questions[i];
-    if (!q.text.trim()) {
-      error.value = `Пустой текст вопроса № ${i + 1}`;
-      return;
-    }
-    const filled = q.options.filter((o) => o.text.trim());
-    if (filled.length < 2) {
-      error.value = `Вопрос ${i + 1}: нужно минимум 2 непустых варианта`;
-      return;
-    }
-    const correct = q.options.filter((o) => o.is_correct && o.text.trim());
-    if (correct.length < 1) {
-      error.value = `Вопрос ${i + 1}: отметьте хотя бы один правильный вариант`;
-      return;
-    }
-    if (q.question_type === "single" && correct.length !== 1) {
-      error.value = `Вопрос ${i + 1}: для одного ответа отметьте ровно один вариант`;
+    const issues = questionIssues(wordPreview.questions[i]);
+    if (issues.length > 0) {
+      error.value = `Вопрос ${i + 1}: ${issues.join(", ")}`;
       return;
     }
   }
@@ -394,6 +474,14 @@ async function applyWordImport(dryRun: boolean) {
       : `Сохранено: вопросов ${data.questions_count}, тест ${data.mode === "created" ? "создан" : "обновлён"}.`;
     if (!dryRun) {
       wordPreviewOpen.value = false;
+      importWordFile.value = null;
+      importWordCode.value = "";
+      importWordTitle.value = "";
+      importWordDescription.value = "";
+      wordWarnings.value = [];
+      if (wordFileInput.value) {
+        wordFileInput.value.value = "";
+      }
       await loadTests();
     }
   } catch (e: any) {
@@ -598,74 +686,141 @@ onMounted(async () => {
         <button type="button" class="ghost" @click="goToAnalytics">Аналитика прохождений</button>
       </div>
     </div>
-    <p class="muted page-desc">Выберите ресторан и роль, затем добавьте вопросы и варианты ответов.</p>
+    <p class="muted page-desc">Добавьте тест удобным способом: загрузите готовый файл или создайте вручную.</p>
     <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="success" class="muted">{{ success }}</p>
-    <p v-if="importReport" class="muted">{{ importReport }}</p>
+    <p v-if="success" class="success">{{ success }}</p>
+    <p v-if="importReport" class="success">{{ importReport }}</p>
 
-    <hr class="card-divider" />
-
-    <div class="test-import-card card">
-      <h3>Импорт из Excel</h3>
-      <p class="muted" style="margin: 0 0 14px 0">Загрузите файл по шаблону для массового создания тестов.</p>
-      <div class="test-import-row">
-        <button type="button" class="ghost" @click="downloadImportTemplate">Скачать шаблон</button>
-        <input type="file" accept=".xlsx" @change="onImportFileChange" class="test-file-input" />
-      </div>
-      <label class="test-checkbox-label">
-        <input type="checkbox" v-model="importDryRun" />
-        Dry-run (только проверка, без сохранения)
-      </label>
-      <button type="button" class="test-import-btn" @click="uploadImportFile" :disabled="saving">Загрузить</button>
+    <div class="create-tabs" role="tablist">
+      <button
+        type="button"
+        class="create-tab"
+        :class="{ 'create-tab--active': createTab === 'word' }"
+        @click="createTab = 'word'"
+      >
+        📄 Из Word
+      </button>
+      <button
+        type="button"
+        class="create-tab"
+        :class="{ 'create-tab--active': createTab === 'excel' }"
+        @click="createTab = 'excel'"
+      >
+        📊 Из Excel
+      </button>
+      <button
+        type="button"
+        class="create-tab"
+        :class="{ 'create-tab--active': createTab === 'manual' }"
+        @click="createTab = 'manual'"
+      >
+        ✏️ Вручную
+      </button>
     </div>
 
-    <hr class="card-divider" />
-
-    <div class="test-import-card card">
+    <div v-if="createTab === 'word'" class="test-import-card card">
       <h3>Импорт из Word (.docx)</h3>
       <p class="muted" style="margin: 0 0 14px 0">
         Вопросы с номерами «1.», «2.», варианты «A)», «B)» … Правильные ответы выделите <strong>жирным</strong> в Word.
-        Формат описан в <code>docs/word_tests_format.md</code>.
+        После разбора откроется предпросмотр: там можно всё поправить, выбрать рестораны и роли и только потом сохранить.
       </p>
-      <p class="muted" style="margin: 0 0 10px 0">
-        Рестораны и роли вы отметите галочками в окне предпросмотра после разбора файла.
-      </p>
-      <div class="test-form-grid" style="margin-bottom: 12px">
-        <div class="test-form-field">
-          <label>Код теста (external_code)</label>
-          <input v-model="importWordCode" placeholder="например waiter_menu_01" class="test-question-input" />
+      <div
+        class="file-drop"
+        :class="{ 'file-drop--active': wordDragOver, 'file-drop--filled': !!importWordFile }"
+        @click="pickWordFile"
+        @dragover.prevent="wordDragOver = true"
+        @dragleave="wordDragOver = false"
+        @drop.prevent="onWordDrop"
+      >
+        <input
+          ref="wordFileInput"
+          type="file"
+          accept=".docx"
+          @change="onImportWordFileChange"
+          class="file-drop-input"
+        />
+        <template v-if="importWordFile">
+          <span class="file-drop-icon">📄</span>
+          <span class="file-drop-name">{{ importWordFile.name }}</span>
+          <span class="muted">Нажмите, чтобы выбрать другой файл</span>
+        </template>
+        <template v-else>
+          <span class="file-drop-icon">⬆️</span>
+          <span class="file-drop-name">Перетащите файл .docx сюда или нажмите для выбора</span>
+        </template>
+      </div>
+      <details class="import-optional">
+        <summary class="muted">Код, название и описание (необязательно — подставятся из имени файла)</summary>
+        <div class="test-form-grid" style="margin-top: 12px">
+          <div class="test-form-field">
+            <label>Код теста (external_code)</label>
+            <input v-model="importWordCode" placeholder="например waiter_menu_01" class="test-question-input" />
+          </div>
+          <div class="test-form-field">
+            <label>Название теста</label>
+            <input v-model="importWordTitle" placeholder="Название для списка" class="test-question-input" />
+          </div>
         </div>
-        <div class="test-form-field">
-          <label>Название теста</label>
-          <input v-model="importWordTitle" placeholder="Название для списка" class="test-question-input" />
+        <div class="test-form-field" style="margin-bottom: 0">
+          <label>Описание (необязательно)</label>
+          <input v-model="importWordDescription" placeholder="Краткое описание" class="test-question-input" />
         </div>
-      </div>
-      <div class="test-form-field" style="margin-bottom: 12px">
-        <label>Описание (необязательно)</label>
-        <input v-model="importWordDescription" placeholder="Краткое описание" class="test-question-input" />
-      </div>
-      <div class="test-import-row">
-        <input type="file" accept=".docx" @change="onImportWordFileChange" class="test-file-input" />
-      </div>
-      <div class="test-form-actions" style="margin-top: 8px; flex-wrap: wrap; gap: 10px">
+      </details>
+      <div class="test-form-actions" style="margin-top: 14px; border-top: none; padding-top: 0">
         <button
           type="button"
-          class="test-import-btn"
+          class="test-submit-btn"
           @click="parseWordForPreview"
-          :disabled="saving || wordPreviewSaving"
+          :disabled="saving || wordPreviewSaving || !importWordFile"
         >
-          Разобрать и открыть предпросмотр
+          {{ saving ? "Разбираем..." : "Разобрать и открыть предпросмотр" }}
         </button>
       </div>
-      <p class="muted" style="margin: 10px 0 0 0; font-size: 0.9em">
-        После разбора откроется окно: можно править вопросы, варианты и тип (один или несколько правильных), затем
-        «Проверить без сохранения» или «Сохранить в базу».
-      </p>
     </div>
 
-    <hr class="card-divider" />
+    <div v-else-if="createTab === 'excel'" class="test-import-card card">
+      <h3>Импорт из Excel</h3>
+      <p class="muted" style="margin: 0 0 14px 0">
+        Массовое создание тестов по шаблону: одна строка — один вопрос, колонка «Код_теста» объединяет вопросы в тест.
+      </p>
+      <div class="test-import-row">
+        <button type="button" class="ghost" @click="downloadImportTemplate">⬇️ Скачать шаблон</button>
+      </div>
+      <div
+        class="file-drop"
+        :class="{ 'file-drop--active': excelDragOver, 'file-drop--filled': !!importFile }"
+        @click="pickExcelFile"
+        @dragover.prevent="excelDragOver = true"
+        @dragleave="excelDragOver = false"
+        @drop.prevent="onExcelDrop"
+      >
+        <input
+          ref="excelFileInput"
+          type="file"
+          accept=".xlsx"
+          @change="onImportFileChange"
+          class="file-drop-input"
+        />
+        <template v-if="importFile">
+          <span class="file-drop-icon">📊</span>
+          <span class="file-drop-name">{{ importFile.name }}</span>
+          <span class="muted">Нажмите, чтобы выбрать другой файл</span>
+        </template>
+        <template v-else>
+          <span class="file-drop-icon">⬆️</span>
+          <span class="file-drop-name">Перетащите файл .xlsx сюда или нажмите для выбора</span>
+        </template>
+      </div>
+      <label class="test-checkbox-label">
+        <input type="checkbox" v-model="importDryRun" />
+        Сначала только проверить, без сохранения (dry-run)
+      </label>
+      <button type="button" class="test-submit-btn" @click="uploadImportFile" :disabled="saving || !importFile">
+        {{ saving ? "Загружаем..." : importDryRun ? "Проверить файл" : "Загрузить в базу" }}
+      </button>
+    </div>
 
-    <form class="test-create-form card" @submit.prevent="createTest">
+    <form v-else class="test-create-form card" @submit.prevent="createTest">
       <h3>Новый тест</h3>
       <div class="test-form-field">
         <label>Кому назначить тест</label>
@@ -876,6 +1031,22 @@ onMounted(async () => {
         Проверьте разобранные данные. При необходимости измените код, название, ресторан, роль и сами вопросы.
       </p>
 
+      <div class="preview-summary">
+        <span class="role-chip">Вопросов: {{ wordPreview.questions.length }}</span>
+        <span v-if="wordPreviewIssueCount > 0" class="role-chip preview-summary-issues">
+          Требуют внимания: {{ wordPreviewIssueCount }}
+        </span>
+        <span v-else class="role-chip preview-summary-ok">Все вопросы в порядке ✓</span>
+      </div>
+
+      <div v-if="wordWarnings.length > 0" class="warning-box">
+        <strong>Парсер не смог разобрать часть данных автоматически:</strong>
+        <ul>
+          <li v-for="(w, wIdx) in wordWarnings" :key="wIdx">{{ w }}</li>
+        </ul>
+        <p style="margin: 6px 0 0 0">Проблемные вопросы подсвечены ниже — поправьте их перед сохранением.</p>
+      </div>
+
       <div class="test-form-grid">
         <div class="test-form-field">
           <label>Код теста (external_code)</label>
@@ -900,7 +1071,12 @@ onMounted(async () => {
         В файле не найдено вопросов по формату — добавьте их вручную кнопкой ниже.
       </p>
       <div class="test-questions-block">
-        <div v-for="(question, qIdx) in wordPreview.questions" :key="qIdx" class="test-question-card">
+        <div
+          v-for="(question, qIdx) in wordPreview.questions"
+          :key="qIdx"
+          class="test-question-card"
+          :class="{ 'test-question-card--issue': questionIssues(question).length > 0 }"
+        >
           <div class="test-question-header">
             <span class="test-question-num">Вопрос {{ qIdx + 1 }}</span>
             <button
@@ -912,6 +1088,9 @@ onMounted(async () => {
               Удалить
             </button>
           </div>
+          <p v-if="questionIssues(question).length > 0" class="test-question-issue-note">
+            ⚠ {{ questionIssues(question).join(" · ") }}
+          </p>
           <div class="test-form-field">
             <label>Текст вопроса</label>
             <textarea
@@ -996,10 +1175,19 @@ onMounted(async () => {
         <button type="button" class="ghost" @click="applyWordImport(true)" :disabled="wordPreviewSaving">
           Проверить без сохранения
         </button>
-        <button type="button" class="test-submit-btn" @click="applyWordImport(false)" :disabled="wordPreviewSaving">
-          Сохранить в базу
+        <button
+          type="button"
+          class="test-submit-btn"
+          @click="applyWordImport(false)"
+          :disabled="wordPreviewSaving || wordPreviewIssueCount > 0"
+          :title="wordPreviewIssueCount > 0 ? 'Сначала поправьте подсвеченные вопросы' : ''"
+        >
+          {{ wordPreviewSaving ? "Сохраняем..." : "Сохранить в базу" }}
         </button>
       </div>
+      <p v-if="wordPreviewIssueCount > 0" class="muted" style="margin: 8px 0 0 0; font-size: 13px">
+        Кнопка «Сохранить в базу» станет доступна, когда все подсвеченные вопросы будут исправлены.
+      </p>
     </div>
   </div>
 

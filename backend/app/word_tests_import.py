@@ -165,8 +165,15 @@ def group_paragraphs_by_question(doc) -> list[list]:
     return groups
 
 
-def parsed_to_quiz_questions(parsed: list[ParsedQuestion]) -> tuple[list[dict], list[str]]:
-    """Преобразует в структуру для QuizTestCreate; собирает ошибки валидации."""
+def parsed_to_quiz_questions(
+    parsed: list[ParsedQuestion], strict: bool = True
+) -> tuple[list[dict], list[str]]:
+    """Преобразует в структуру для QuizTestCreate; собирает ошибки валидации.
+
+    strict=True — проблемный вопрос отбрасывается, текст идёт в errors.
+    strict=False — вопрос включается как есть, текст идёт в errors как предупреждение
+    (правится вручную в предпросмотре на фронте).
+    """
     from app.models.quiz import QuestionType
 
     out: list[dict] = []
@@ -175,17 +182,19 @@ def parsed_to_quiz_questions(parsed: list[ParsedQuestion]) -> tuple[list[dict], 
         opts = pq.options
         if len(opts) < 2:
             errors.append(f"Вопрос {i}: нужно минимум 2 варианта ответа (найдено {len(opts)})")
-            continue
+            if strict:
+                continue
         n_correct = sum(1 for o in opts if o["is_correct"])
         if n_correct < 1:
             errors.append(
                 f"Вопрос {i}: отметьте жирным хотя бы один правильный ответ (или проверьте формат «A) текст»)"
             )
-            continue
-        if n_correct == 1:
-            qtype = QuestionType.SINGLE.value
-        else:
+            if strict:
+                continue
+        if n_correct > 1:
             qtype = QuestionType.MULTIPLE.value
+        else:
+            qtype = QuestionType.SINGLE.value
         out.append(
             {
                 "text": pq.text,
@@ -196,10 +205,14 @@ def parsed_to_quiz_questions(parsed: list[ParsedQuestion]) -> tuple[list[dict], 
     return out, errors
 
 
-def parse_docx_to_questions(content: bytes) -> tuple[list[dict], list[str]]:
+def parse_docx_to_questions(content: bytes, strict: bool = True) -> tuple[list[dict], list[str]]:
     """
     Читает .docx и возвращает (questions_payload, errors).
-    errors — только ошибки уровня вопроса; пустой список при успехе.
+
+    strict=True: при любой ошибке уровня вопроса возвращается ([], errors) — импорт блокируется.
+    strict=False (предпросмотр): возвращаются все разобранные вопросы, даже проблемные,
+    а errors — предупреждения для показа пользователю; блокируют только фатальные
+    ошибки (файл не читается / вопросов нет вовсе).
     """
     try:
         from docx import Document
@@ -226,15 +239,15 @@ def parse_docx_to_questions(content: bytes) -> tuple[list[dict], list[str]]:
         if pq is None:
             block_errors.append(f"Блок {gi}: не удалось разобрать вопрос (проверьте «1.» и варианты «A)»)")
             continue
-        if len(pq.options) < 2:
+        if strict and len(pq.options) < 2:
             block_errors.append(f"Блок {gi}: мало вариантов ответа (нужно минимум 2)")
             continue
         parsed.append(pq)
 
-    questions, q_errors = parsed_to_quiz_questions(parsed)
+    questions, q_errors = parsed_to_quiz_questions(parsed, strict=strict)
     all_errors = block_errors + q_errors
-    if all_errors:
+    if strict and all_errors:
         return [], all_errors
     if not questions:
-        return [], ["Не удалось сформировать ни одного вопроса"]
-    return questions, []
+        return [], all_errors or ["Не удалось сформировать ни одного вопроса"]
+    return questions, all_errors

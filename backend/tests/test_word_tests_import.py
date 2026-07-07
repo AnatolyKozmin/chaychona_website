@@ -56,3 +56,58 @@ def test_parse_multiline_question() -> None:
     assert "Первая строка" in questions[0]["text"]
     assert "вторая строка" in questions[0]["text"]
     assert questions[0]["options"][1]["is_correct"] is True
+
+
+def _doc_with_good_and_bad_question() -> bytes:
+    from docx import Document
+
+    d = Document()
+    # хороший вопрос
+    p = d.add_paragraph()
+    p.add_run("1. Хороший вопрос? A) нет B) ")
+    r = p.add_run("да")
+    r.bold = True
+    # плохой: ни один вариант не выделен жирным
+    d.add_paragraph("2. Плохой вопрос? A) раз B) два")
+
+    buf = io.BytesIO()
+    d.save(buf)
+    return buf.getvalue()
+
+
+def test_strict_mode_blocks_whole_file_on_bad_question() -> None:
+    from app.word_tests_import import parse_docx_to_questions
+
+    questions, errors = parse_docx_to_questions(_doc_with_good_and_bad_question())
+    assert questions == []
+    assert len(errors) == 1
+    assert "Вопрос 2" in errors[0]
+
+
+def test_lenient_mode_returns_questions_with_warnings() -> None:
+    from app.word_tests_import import parse_docx_to_questions
+
+    questions, warnings = parse_docx_to_questions(_doc_with_good_and_bad_question(), strict=False)
+    assert len(questions) == 2
+    assert len(warnings) == 1
+    assert "Вопрос 2" in warnings[0]
+    # проблемный вопрос включён как есть — без отмеченных правильных ответов
+    assert all(o["is_correct"] is False for o in questions[1]["options"])
+
+
+def test_lenient_mode_no_warnings_on_clean_file() -> None:
+    from docx import Document
+
+    from app.word_tests_import import parse_docx_to_questions
+
+    d = Document()
+    p = d.add_paragraph()
+    p.add_run("1. Вопрос? A) нет B) ")
+    r = p.add_run("да")
+    r.bold = True
+    buf = io.BytesIO()
+    d.save(buf)
+
+    questions, warnings = parse_docx_to_questions(buf.getvalue(), strict=False)
+    assert warnings == []
+    assert len(questions) == 1

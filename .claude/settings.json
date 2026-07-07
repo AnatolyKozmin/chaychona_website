@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/anato/OneDrive/Desktop/projects/chaychona_website/backend/**)",
+      "PowerShell(python -m pip install -q python-docx pytest 2>$null)",
+      "PowerShell(python -c \"import docx, pytest; print\\('deps OK'\\)\")",
+      "PowerShell(python -m pip install -q -r requirements.txt 2>$null)",
+      "PowerShell(python -m pytest tests/test_word_tests_import.py -v 2>&1)",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; python \"C:\\\\Users\\\\anato\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-anato-OneDrive-Desktop-projects-chaychona-website\\\\1e4d684f-2c94-4c34-bfec-c2e1557d0798\\\\scratchpad\\\\try_parse.py\")",
+      "PowerShell(Test-NetConnection -ComputerName localhost -Port 5432 -InformationLevel Quiet -WarningAction SilentlyContinue)",
+      "PowerShell(python -c \"import app.main; import app.api.v1.tests; import app.word_tests_import; print\\('imports OK'\\)\")",
+      "PowerShell($env:DATABASE_URL='postgresql+psycopg2://x:x@localhost:5432/x'; $env:JWT_SECRET_KEY='t'; $env:BOOTSTRAP_SUPERADMIN_EMAIL='t@t.t'; $env:BOOTSTRAP_SUPERADMIN_PASSWORD='t'; Set-Location backend; python -c \"import app.main; import app.api.v1.tests; import app.word_tests_import; print\\('imports OK'\\)\")",
+      "PowerShell(npx vue-tsc --noEmit 2>&1)",
+      "PowerShell(npm install --no-audit --no-fund 2>&1)",
+      "PowerShell(npm run build 2>&1)",
+      "PowerShell($env:DATABASE_URL='postgresql+psycopg2://x:x@localhost:5432/x'; $env:JWT_SECRET_KEY='t'; $env:BOOTSTRAP_SUPERADMIN_EMAIL='t@t.t'; $env:BOOTSTRAP_SUPERADMIN_PASSWORD='t'; Set-Location ..\\\\backend; python -c \"import app.main; from app.schemas.quiz import QuizScoreboardResponse; print\\('backend OK'\\)\"; python -m pytest tests/test_word_tests_import.py -q 2>&1 | Select-Object -Last 2)",
+      "PowerShell($env:DATABASE_URL='postgresql+psycopg2://x:x@localhost:5432/x'; $env:JWT_SECRET_KEY='t'; $env:BOOTSTRAP_SUPERADMIN_EMAIL='t@t.t'; $env:BOOTSTRAP_SUPERADMIN_PASSWORD='t'; Set-Location 'c:\\\\Users\\\\anato\\\\OneDrive\\\\Desktop\\\\projects\\\\chaychona_website\\\\backend'; python -c \"import app.main; from app.schemas.quiz import QuizScoreboardResponse; print\\('backend OK'\\)\"; python -m pytest tests/test_word_tests_import.py -q 2>&1 | Select-Object -Last 2)"
+    ]
+  }
+}
