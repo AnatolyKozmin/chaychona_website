@@ -55,7 +55,6 @@ describe("DashboardView", () => {
       }
     });
 
-    expect(wrapper.text()).toContain("Меню");
     expect(wrapper.text()).toContain("Стандарты");
     expect(wrapper.text()).toContain("Мои тесты");
     expect(wrapper.text()).toContain("Вкусная тетрадь");

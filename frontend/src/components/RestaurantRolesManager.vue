@@ -148,6 +148,20 @@ async function addRole(restaurant: RestaurantWithRoles) {
   }
 }
 
+async function renameRole(restaurant: RestaurantWithRoles, role: CatalogItem) {
+  const name = (window.prompt(`Новое название роли «${role.name}»:`, role.name) ?? "").trim();
+  if (!name || name === role.name) return;
+  clearMessages();
+  try {
+    await api.put(`/users/catalog/job-titles/${role.id}`, { name });
+    success.value = `Роль «${role.name}» переименована в «${name}» — у сотрудников должность обновлена автоматически`;
+    await load();
+    notifyChanged();
+  } catch (e: any) {
+    error.value = extractError(e, "Не удалось переименовать роль");
+  }
+}
+
 async function deleteRole(restaurant: RestaurantWithRoles, role: CatalogItem) {
   if (!window.confirm(`Удалить роль «${role.name}» из «${restaurant.name}»?`)) return;
   clearMessages();
@@ -225,6 +239,12 @@ defineExpose({ reload: load });
           <div class="rrm-chips">
             <span v-for="role in r.roles" :key="role.id" class="rrm-chip">
               <span class="rrm-chip-name">{{ role.name }}</span>
+              <button
+                type="button"
+                class="rrm-chip-x"
+                title="Переименовать роль"
+                @click="renameRole(r, role)"
+              >✎</button>
               <button
                 type="button"
                 class="rrm-chip-x"

@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
+from app.api.v1.tests import _query_tests_for_user
 from app.db.session import get_db
 from app.models.course import Course
 from app.models.menu import MenuCategory, MenuDish
@@ -24,26 +25,11 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
 def _norm(value: str | None) -> str:
-    return (value or "").strip().lower()
+    return " ".join((value or "").strip().lower().replace("ё", "е").split())
 
 
-def _query_tests_for_user(db: Session, user: User) -> list[QuizTest]:
-    tests = list(db.scalars(select(QuizTest).order_by(QuizTest.created_at.desc())).all())
-    if user.role != Role.LEARNER:
-        return tests
-    user_restaurant = _norm(user.restaurant)
-    user_job_title = _norm(user.job_title)
-    if not user_restaurant or not user_job_title:
-        return []
-    matched: list[QuizTest] = []
-    for test in tests:
-        restaurant = db.get(RestaurantCatalog, test.restaurant_id)
-        job_title = db.get(JobTitleCatalog, test.job_title_id)
-        if not restaurant or not job_title:
-            continue
-        if _norm(restaurant.name) == user_restaurant and _norm(job_title.name) == user_job_title:
-            matched.append(test)
-    return matched
+# Матчинг тестов — общий с /tests/my (через quiz_test_assignments),
+# чтобы счётчики на дашборде совпадали со списком «Мои тесты».
 
 
 def _query_courses_for_user(db: Session, user: User) -> list[Course]:

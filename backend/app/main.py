@@ -107,6 +107,66 @@ def _run_startup() -> None:
                 "END $$;"
             )
         )
+        # Отметки чек-листов не должны блокировать редактирование чек-листа:
+        # пункт может быть пересоздан, ссылка обнуляется, название хранится в снапшоте item_title.
+        connection.execute(
+            text(
+                "ALTER TABLE checklist_item_completions "
+                "ADD COLUMN IF NOT EXISTS item_title VARCHAR(500) NOT NULL DEFAULT ''"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE checklist_item_completions ic "
+                "SET item_title = i.title "
+                "FROM checklist_items i "
+                "WHERE ic.item_title = '' AND ic.checklist_item_id = i.id"
+            )
+        )
+        connection.execute(
+            text("ALTER TABLE checklist_item_completions ALTER COLUMN checklist_item_id DROP NOT NULL")
+        )
+        connection.execute(
+            text(
+                "DO $$ "
+                "BEGIN "
+                "IF EXISTS ("
+                "  SELECT 1 FROM pg_constraint "
+                "  WHERE conname = 'checklist_item_completions_checklist_item_id_fkey' AND confdeltype <> 'n'"
+                ") THEN "
+                "ALTER TABLE checklist_item_completions DROP CONSTRAINT checklist_item_completions_checklist_item_id_fkey; "
+                "END IF; "
+                "IF NOT EXISTS ("
+                "  SELECT 1 FROM pg_constraint WHERE conname = 'checklist_item_completions_checklist_item_id_fkey'"
+                ") THEN "
+                "ALTER TABLE checklist_item_completions "
+                "ADD CONSTRAINT checklist_item_completions_checklist_item_id_fkey "
+                "FOREIGN KEY (checklist_item_id) REFERENCES checklist_items (id) ON DELETE SET NULL; "
+                "END IF; "
+                "END $$;"
+            )
+        )
+        # Прогресс по блокам курса удаляется вместе с блоками (они пересоздаются при редактировании).
+        connection.execute(
+            text(
+                "DO $$ "
+                "BEGIN "
+                "IF EXISTS ("
+                "  SELECT 1 FROM pg_constraint "
+                "  WHERE conname = 'course_block_progress_block_id_fkey' AND confdeltype <> 'c'"
+                ") THEN "
+                "ALTER TABLE course_block_progress DROP CONSTRAINT course_block_progress_block_id_fkey; "
+                "END IF; "
+                "IF NOT EXISTS ("
+                "  SELECT 1 FROM pg_constraint WHERE conname = 'course_block_progress_block_id_fkey'"
+                ") THEN "
+                "ALTER TABLE course_block_progress "
+                "ADD CONSTRAINT course_block_progress_block_id_fkey "
+                "FOREIGN KEY (block_id) REFERENCES course_blocks (id) ON DELETE CASCADE; "
+                "END IF; "
+                "END $$;"
+            )
+        )
         connection.execute(text("ALTER TABLE menu_dishes ADD COLUMN IF NOT EXISTS restaurant_id UUID"))
         connection.execute(
             text(
@@ -299,7 +359,10 @@ def get_menu_media(path: str = Query(..., min_length=1)):
 
     for root in roots:
         candidate = (root / normalized_path).resolve()
-        if not str(candidate).startswith(str(root)):
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            # Путь вышел за пределы корня (в т.ч. каталог-сосед с похожим префиксом имени)
             continue
         if candidate.exists() and candidate.is_file():
             return FileResponse(candidate)

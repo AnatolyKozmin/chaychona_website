@@ -24,6 +24,7 @@ from app.schemas.menu import (
 
 router = APIRouter(prefix="/menu", tags=["menu"])
 UPLOAD_ROOT = Path(__file__).resolve().parents[3] / "media_uploads" / "uploads"
+MAX_MEDIA_SIZE_BYTES = 200 * 1024 * 1024
 
 
 def _to_media_url(path: str | None) -> str | None:
@@ -492,6 +493,11 @@ async def upload_media_admin(
     content = await file.read()
     if not content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пустой")
+    if len(content) > MAX_MEDIA_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Файл слишком большой (максимум 200 МБ)",
+        )
     target_path.write_bytes(content)
     return MenuMediaUploadResponse(path=f"uploads/{file_name}")
 

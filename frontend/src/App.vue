@@ -20,6 +20,9 @@ onMounted(async () => {
       await auth.fetchMe();
     } catch {
       await auth.refresh();
+      if (!auth.isAuthenticated && route.name !== "login") {
+        router.replace({ name: "login" });
+      }
     }
   }
 });

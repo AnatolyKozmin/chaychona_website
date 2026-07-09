@@ -213,6 +213,9 @@ def _replace_blocks(db: Session, course_id: int, blocks_data):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Добавьте хотя бы один блок")
     block_ids = list(db.scalars(select(CourseBlock.id).where(CourseBlock.course_id == course_id)).all())
     if block_ids:
+        # Блоки пересоздаются с новыми id — старый прогресс не сопоставить,
+        # без чистки FK не даст удалить блоки.
+        db.execute(delete(CourseBlockProgress).where(CourseBlockProgress.course_id == course_id))
         db.execute(delete(CourseSubBlock).where(CourseSubBlock.block_id.in_(block_ids)))
     db.execute(delete(CourseBlock).where(CourseBlock.course_id == course_id))
     db.flush()
@@ -339,6 +342,7 @@ def delete_course_admin(
     course = db.get(Course, course_id)
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Курс не найден")
+    db.execute(delete(CourseBlockProgress).where(CourseBlockProgress.course_id == course.id))
     blocks = list(db.scalars(select(CourseBlock).where(CourseBlock.course_id == course.id)).all())
     for block in blocks:
         subblocks = list(db.scalars(select(CourseSubBlock).where(CourseSubBlock.block_id == block.id)).all())

@@ -33,6 +33,7 @@ from app.schemas.checklist import (
 
 router = APIRouter(prefix="/checklists", tags=["checklists"])
 UPLOAD_ROOT = Path(__file__).resolve().parents[3] / "media_uploads" / "checklist_photos"
+MAX_PHOTO_SIZE_BYTES = 15 * 1024 * 1024
 
 
 def _parse_uuid(value: str | None) -> UUID | None:
@@ -147,6 +148,14 @@ def delete_shift_type_admin(
     st = db.get(ShiftType, type_id)
     if not st:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Тип смены не найден")
+    checklists_count = db.scalar(
+        select(func.count()).select_from(Checklist).where(Checklist.shift_type_id == type_id)
+    ) or 0
+    if checklists_count:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Нельзя удалить тип смены: он используется в чек-листах ({checklists_count}). Сначала открепите их.",
+        )
     db.delete(st)
     db.commit()
 
@@ -307,12 +316,14 @@ def get_completion_admin(
     shift_type = db.get(ShiftType, cl.shift_type_id) if cl and cl.shift_type_id else None
     if not cl or not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Данные не найдены")
+    # Outer join: пункт мог быть удалён при редактировании чек-листа —
+    # тогда название берём из снапшота item_title.
     item_completions = list(
         db.execute(
             select(ChecklistItemCompletion, ChecklistItem)
-            .join(ChecklistItem, ChecklistItemCompletion.checklist_item_id == ChecklistItem.id)
+            .join(ChecklistItem, ChecklistItemCompletion.checklist_item_id == ChecklistItem.id, isouter=True)
             .where(ChecklistItemCompletion.completion_id == completion_id)
-            .order_by(ChecklistItem.sort_order.asc())
+            .order_by(ChecklistItemCompletion.id.asc())
         ).all()
     )
     return ChecklistCompletionDetailPublic(
@@ -329,9 +340,9 @@ def get_completion_admin(
         items_count=len(item_completions),
         item_completions=[
             ChecklistItemCompletionPublic(
-                checklist_item_id=item.id,
-                checklist_item_title=item.title,
-                requires_photo=item.requires_photo,
+                checklist_item_id=item.id if item else None,
+                checklist_item_title=item.title if item else (ic.item_title or "Пункт удалён"),
+                requires_photo=item.requires_photo if item else bool(ic.photo_path),
                 photo_path=ic.photo_path,
                 photo_url=_media_url(ic.photo_path),
             )
@@ -404,6 +415,15 @@ def delete_checklist_admin(
     cl = db.get(Checklist, checklist_id)
     if not cl:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Чек-лист не найден")
+    # Как при удалении теста: история прохождений уходит вместе с чек-листом,
+    # иначе FK-ссылки не дадут удалить его вовсе.
+    completion_ids = list(
+        db.scalars(select(ChecklistCompletion.id).where(ChecklistCompletion.checklist_id == cl.id)).all()
+    )
+    if completion_ids:
+        db.execute(delete(ChecklistItemCompletion).where(ChecklistItemCompletion.completion_id.in_(completion_ids)))
+        db.execute(delete(ChecklistCompletion).where(ChecklistCompletion.id.in_(completion_ids)))
+    db.execute(delete(ChecklistItem).where(ChecklistItem.checklist_id == cl.id))
     db.delete(cl)
     db.commit()
 
@@ -488,6 +508,12 @@ def complete_checklist_my(
     for item in items:
         ic = completion_by_item.get(item.id)
         photo_path = ic.photo_path if ic else None
+        if photo_path and not photo_path.startswith("checklist_photos/"):
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Некорректный путь к фото: используйте загрузку через приложение",
+            )
         if item.requires_photo and not photo_path:
             db.rollback()
             raise HTTPException(
@@ -498,6 +524,7 @@ def complete_checklist_my(
             ChecklistItemCompletion(
                 completion_id=completion.id,
                 checklist_item_id=item.id,
+                item_title=item.title,
                 photo_path=photo_path,
             )
         )
@@ -523,5 +550,10 @@ async def upload_checklist_photo(
     content = await file.read()
     if not content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пустой")
+    if len(content) > MAX_PHOTO_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Файл слишком большой (максимум 15 МБ)",
+        )
     target_path.write_bytes(content)
     return {"path": f"checklist_photos/{file_name}"}

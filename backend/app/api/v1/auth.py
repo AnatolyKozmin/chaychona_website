@@ -70,7 +70,14 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.email == payload.login.lower()))
     if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect login or password")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный логин или пароль")
+    # Как и в /refresh и get_current_user: отключённый пользователь не должен получать токены,
+    # иначе вход «проходит», но каждый следующий запрос отвечает 401.
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Учётная запись отключена. Обратитесь к администратору.",
+        )
 
     return TokenPair(
         access_token=create_access_token(str(user.id), user.role.value),

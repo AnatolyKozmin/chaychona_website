@@ -95,7 +95,8 @@ class ChecklistCompletionPublic(BaseModel):
 
 
 class ChecklistItemCompletionPublic(BaseModel):
-    checklist_item_id: int
+    # None, если пункт был удалён при редактировании чек-листа (название — из снапшота)
+    checklist_item_id: int | None
     checklist_item_title: str
     requires_photo: bool
     photo_path: str | None

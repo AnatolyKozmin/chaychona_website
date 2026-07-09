@@ -48,5 +48,9 @@ class CourseBlockProgress(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False, index=True)
-    block_id: Mapped[int] = mapped_column(ForeignKey("course_blocks.id"), nullable=False, index=True)
+    # Блоки пересоздаются при каждом редактировании курса — прогресс по старым
+    # блокам не имеет смысла и удаляется вместе с ними.
+    block_id: Mapped[int] = mapped_column(
+        ForeignKey("course_blocks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     completed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

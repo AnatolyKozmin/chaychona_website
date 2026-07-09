@@ -33,12 +33,34 @@ const router = createRouter({
   ]
 });
 
+/** Живой ли JWT: парсим exp, а не просто проверяем наличие строки в localStorage. */
+function tokenAlive(token: string | null): boolean {
+  if (!token) {
+    return false;
+  }
+  try {
+    const payloadPart = token.split(".")[1];
+    const payload = JSON.parse(atob(payloadPart.replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload.exp === "number" && payload.exp * 1000 > Date.now();
+  } catch {
+    return false;
+  }
+}
+
 router.beforeEach((to) => {
-  const isAuthenticated = Boolean(localStorage.getItem("access_token"));
-  if (!isAuthenticated && to.name !== "login") {
+  const accessAlive = tokenAlive(localStorage.getItem("access_token"));
+  const refreshAlive = tokenAlive(localStorage.getItem("refresh_token"));
+  // Живой refresh-токен тоже считается сессией: интерцептор восстановит access сам.
+  const hasSession = accessAlive || refreshAlive;
+  if (!hasSession) {
+    // Мёртвые токены не должны блокировать страницу входа — вычищаем их.
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+  }
+  if (!hasSession && to.name !== "login") {
     return { name: "login" };
   }
-  if (isAuthenticated && to.name === "login") {
+  if (hasSession && to.name === "login") {
     return { name: "dashboard" };
   }
   return true;

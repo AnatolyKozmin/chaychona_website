@@ -65,5 +65,10 @@ class ChecklistItemCompletion(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     completion_id: Mapped[int] = mapped_column(ForeignKey("checklist_completions.id"), nullable=False, index=True)
-    checklist_item_id: Mapped[int] = mapped_column(ForeignKey("checklist_items.id"), nullable=False, index=True)
+    # Пункт может быть удалён при редактировании чек-листа — история прохождения
+    # сохраняется за счёт снапшота названия (item_title).
+    checklist_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("checklist_items.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    item_title: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     photo_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)

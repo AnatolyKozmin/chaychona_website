@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.models.checklist import Checklist, ChecklistCompletion, ChecklistItem
+from app.models.course import Course
+from app.models.menu import MenuCategory, MenuDish
 from app.models.quiz import QuizAttempt, QuizTest, QuizTestAssignment
 from app.core.security import get_password_hash
 from app.db.session import get_db
@@ -403,13 +405,36 @@ def delete_restaurant(
         db.scalars(select(QuizTest.id).where(QuizTest.restaurant_id == restaurant_id)).all()
     )
     tests_count = len(assigned_test_ids | primary_test_ids)
+    # Роли ресторана удаляются вместе с ним, поэтому учитываем и контент,
+    # привязанный только к роли (без прямой привязки к ресторану).
+    role_ids_subquery = select(JobTitleCatalog.id).where(JobTitleCatalog.restaurant_id == restaurant_id)
+    courses_count = db.scalar(
+        select(func.count()).select_from(Course).where(
+            (Course.restaurant_id == restaurant_id) | (Course.job_title_id.in_(role_ids_subquery))
+        )
+    ) or 0
+    checklists_count = db.scalar(
+        select(func.count()).select_from(Checklist).where(
+            (Checklist.restaurant_id == restaurant_id) | (Checklist.job_title_id.in_(role_ids_subquery))
+        )
+    ) or 0
+    menu_count = (
+        (db.scalar(select(func.count()).select_from(MenuDish).where(MenuDish.restaurant_id == restaurant_id)) or 0)
+        + (db.scalar(select(func.count()).select_from(MenuCategory).where(MenuCategory.restaurant_id == restaurant_id)) or 0)
+    )
 
-    if users_count or tests_count:
+    if users_count or tests_count or courses_count or checklists_count or menu_count:
         parts: list[str] = []
         if tests_count:
             parts.append(f"тестов: {tests_count}")
         if users_count:
             parts.append(f"пользователей: {users_count}")
+        if courses_count:
+            parts.append(f"курсов: {courses_count}")
+        if checklists_count:
+            parts.append(f"чек-листов: {checklists_count}")
+        if menu_count:
+            parts.append(f"позиций меню: {menu_count}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
@@ -418,7 +443,7 @@ def delete_restaurant(
             ),
         )
 
-    # Связанных тестов/пользователей нет — удаляем сам ресторан и его роли (они без него бессмысленны).
+    # Связанного контента и пользователей нет — удаляем сам ресторан и его роли (они без него бессмысленны).
     job_titles = list(db.scalars(select(JobTitleCatalog).where(JobTitleCatalog.restaurant_id == restaurant_id)).all())
     for job_title in job_titles:
         db.delete(job_title)
@@ -488,13 +513,23 @@ def delete_job_title(
     if restaurant:
         user_filters.append(func.lower(func.coalesce(User.restaurant, "")) == restaurant.name.strip().lower())
     users_count = db.scalar(select(func.count()).select_from(User).where(*user_filters))
+    courses_count = db.scalar(
+        select(func.count()).select_from(Course).where(Course.job_title_id == job_title_id)
+    ) or 0
+    checklists_count = db.scalar(
+        select(func.count()).select_from(Checklist).where(Checklist.job_title_id == job_title_id)
+    ) or 0
 
-    if users_count or tests_count:
+    if users_count or tests_count or courses_count or checklists_count:
         parts: list[str] = []
         if tests_count:
             parts.append(f"тестов: {tests_count}")
         if users_count:
             parts.append(f"пользователей: {users_count}")
+        if courses_count:
+            parts.append(f"курсов: {courses_count}")
+        if checklists_count:
+            parts.append(f"чек-листов: {checklists_count}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
@@ -505,6 +540,55 @@ def delete_job_title(
 
     db.delete(job_title)
     db.commit()
+
+
+@router.put("/catalog/job-titles/{job_title_id}", response_model=JobTitleCatalogItemPublic)
+def update_job_title(
+    job_title_id: UUID,
+    payload: CatalogItemCreate,
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    job_title = db.get(JobTitleCatalog, job_title_id)
+    if not job_title:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Роль не найдена")
+
+    name = payload.name.strip()
+    existing = db.scalar(
+        select(JobTitleCatalog).where(
+            JobTitleCatalog.id != job_title_id,
+            JobTitleCatalog.restaurant_id == job_title.restaurant_id,
+            func.lower(JobTitleCatalog.name) == name.lower(),
+        )
+    )
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Такая роль уже существует в этом ресторане")
+
+    old_name = job_title.name
+    job_title.name = name
+
+    if old_name.strip().lower() != name.lower():
+        # User.job_title хранит текст, а не FK — синхронизируем, чтобы сотрудники
+        # не потеряли доступ к контенту после переименования роли.
+        restaurant = db.get(RestaurantCatalog, job_title.restaurant_id) if job_title.restaurant_id else None
+        user_filters = [func.lower(func.coalesce(User.job_title, "")) == old_name.strip().lower()]
+        if restaurant:
+            user_filters.append(func.lower(func.coalesce(User.restaurant, "")) == restaurant.name.strip().lower())
+        db.execute(update(User).where(*user_filters).values(job_title=name))
+        if restaurant:
+            db.execute(
+                update(RegistrationRequest)
+                .where(
+                    func.lower(func.coalesce(RegistrationRequest.desired_job_title, "")) == old_name.strip().lower(),
+                    func.lower(RegistrationRequest.restaurant) == restaurant.name.strip().lower(),
+                    RegistrationRequest.status == RegistrationRequestStatus.PENDING,
+                )
+                .values(desired_job_title=name)
+            )
+
+    db.commit()
+    db.refresh(job_title)
+    return job_title
 
 
 @router.get("/catalog/restaurants-with-roles", response_model=list[RestaurantWithRolesPublic])

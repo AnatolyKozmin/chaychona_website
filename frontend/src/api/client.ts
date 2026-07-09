@@ -4,7 +4,18 @@ export const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1"
 });
 
+/** Эндпоинты аутентификации: сюда не подставляем токен и не делаем авто-refresh —
+ * 401 от логина означает «неверный логин/пароль», а не протухшую сессию. */
+const AUTH_PATHS = ["/auth/login", "/auth/register", "/auth/refresh"];
+
+function isAuthPath(url: string | undefined): boolean {
+  return Boolean(url && AUTH_PATHS.some((path) => url.includes(path)));
+}
+
 api.interceptors.request.use((config) => {
+  if (isAuthPath(config.url)) {
+    return config;
+  }
   const accessToken = localStorage.getItem("access_token");
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`;
@@ -30,7 +41,7 @@ api.interceptors.response.use(
     const originalRequest = error?.config;
     const status = error?.response?.status;
 
-    if (!originalRequest || status !== 401 || originalRequest._retry) {
+    if (!originalRequest || status !== 401 || originalRequest._retry || isAuthPath(originalRequest.url)) {
       return Promise.reject(error);
     }
 
