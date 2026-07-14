@@ -60,6 +60,8 @@ interface DishAdminItem {
 const auth = useAuthStore();
 const dishes = ref<DishCard[]>([]);
 const categories = ref<DishCategory[]>([]);
+const publicRestaurants = ref<RestaurantItem[]>([]);
+const selectedPublicRestaurant = ref<string>("");
 const selectedCategory = ref("");
 const selectedCategoryLabel = ref(""); // для заголовка при просмотре блюд
 const showCategoriesView = ref(true); // сначала категории, потом блюда
@@ -215,9 +217,34 @@ function toMediaUrl(path: string | null): string | null {
   return `${backendOrigin}${path}`;
 }
 
+async function loadPublicRestaurants() {
+  try {
+    const { data } = await api.get<RestaurantItem[]>("/menu/restaurants");
+    publicRestaurants.value = data;
+    if (data.length > 0 && !data.some((r) => r.id === selectedPublicRestaurant.value)) {
+      selectedPublicRestaurant.value = data[0].id;
+    }
+  } catch {
+    publicRestaurants.value = [];
+  }
+}
+
+function selectPublicRestaurant(restaurantId: string) {
+  if (selectedPublicRestaurant.value === restaurantId) {
+    return;
+  }
+  selectedPublicRestaurant.value = restaurantId;
+  showCategoriesView.value = true;
+  selectedCategory.value = "";
+  selectedCategoryLabel.value = "";
+  void loadCategories();
+}
+
 async function loadCategories() {
   try {
-    const { data } = await api.get<DishCategory[]>("/menu/categories");
+    const { data } = await api.get<DishCategory[]>("/menu/categories", {
+      params: { restaurant_id: selectedPublicRestaurant.value || undefined }
+    });
     categories.value = data;
   } catch {
     categories.value = [];
@@ -229,7 +256,11 @@ async function loadDishes() {
   error.value = "";
   try {
     const { data } = await api.get<{ total: number; items: DishCard[] }>("/menu/feed", {
-      params: { limit: 100, category: selectedCategory.value || undefined }
+      params: {
+        limit: 100,
+        category: selectedCategory.value || undefined,
+        restaurant_id: selectedPublicRestaurant.value || undefined
+      }
     });
     dishes.value = data.items;
     currentIndex.value = 0;
@@ -707,7 +738,7 @@ function onPointerUp() {
 }
 
 onMounted(() => {
-  void loadCategories();
+  void loadPublicRestaurants().then(() => loadCategories());
   if (isSuperadmin.value) {
     void loadRestaurants();
     void loadMenuBranches();
@@ -769,6 +800,20 @@ useBodyScrollLock(computed(() => categoryModalOpen.value || dishModalOpen.value 
 <template>
   <section class="card">
     <h2>Вкусная тетрадь</h2>
+
+    <!-- Переключатель ресторанов -->
+    <div v-if="publicRestaurants.length > 1" class="notebook-restaurant-tabs">
+      <button
+        v-for="restaurant in publicRestaurants"
+        :key="restaurant.id"
+        type="button"
+        class="notebook-restaurant-tab"
+        :class="{ active: restaurant.id === selectedPublicRestaurant }"
+        @click="selectPublicRestaurant(restaurant.id)"
+      >
+        {{ restaurant.name }}
+      </button>
+    </div>
 
     <!-- Экран выбора категорий -->
     <div v-if="showCategoriesView">

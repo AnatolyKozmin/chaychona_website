@@ -85,6 +85,11 @@ class MenuDishCreate(BaseModel):
     video_path: str | None = Field(default=None, max_length=1024)
 
 
+class MenuRestaurantPublic(BaseModel):
+    id: str
+    name: str
+
+
 class MenuFeedResponse(BaseModel):
     total: int
     items: list[MenuDishCard]

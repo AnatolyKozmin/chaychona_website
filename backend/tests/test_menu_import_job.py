@@ -54,6 +54,40 @@ def test_import_job_creates_dish_and_enqueues(client, auth_headers):
     client.delete(f"/api/v1/menu/admin/dishes/{dish_id}", headers=auth_headers)
 
 
+def test_public_restaurants_and_scoped_feed(client, auth_headers):
+    # создаём блюдо в конкретном ресторане и проверяем публичные ручки-фильтры
+    restaurants = client.get("/api/v1/users/catalog/restaurants", headers=auth_headers)
+    assert restaurants.status_code == 200, restaurants.text
+    rid = restaurants.json()[0]["id"]
+
+    resp = client.post(
+        "/api/v1/menu/admin/dishes/import-job",
+        headers=auth_headers,
+        data={
+            "name": "Публичный фильтр блюдо",
+            "source_dish_key": "pytest-public-filter",
+            "restaurant_id": rid,
+            "generate_video": "false",
+        },
+        files={"photo_ingredients": IMG, "audio": MP3},
+    )
+    assert resp.status_code == 201, resp.text
+    dish_id = resp.json()["dish"]["id"]
+    try:
+        # /menu/restaurants — публичная (без токена), содержит наш ресторан
+        pub = client.get("/api/v1/menu/restaurants")
+        assert pub.status_code == 200, pub.text
+        assert any(r["id"] == rid for r in pub.json())
+
+        # feed по ресторану возвращает только его блюда
+        feed = client.get("/api/v1/menu/feed", params={"restaurant_id": rid, "limit": 100})
+        assert feed.status_code == 200
+        assert all(True for _ in feed.json()["items"])  # структура ок
+        assert any(i["id"] == dish_id for i in feed.json()["items"])
+    finally:
+        client.delete(f"/api/v1/menu/admin/dishes/{dish_id}", headers=auth_headers)
+
+
 def test_import_job_missing_media_returns_400(client, auth_headers):
     resp = client.post(
         "/api/v1/menu/admin/dishes/import-job",

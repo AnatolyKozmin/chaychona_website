@@ -23,6 +23,7 @@ from app.schemas.menu import (
     MenuDishJobsSummary,
     MenuFeedResponse,
     MenuMediaUploadResponse,
+    MenuRestaurantPublic,
     GenerateVideosRequest,
     GenerateVideosResponse,
 )
@@ -119,15 +120,29 @@ def _build_dish_admin_public(db: Session, dish: MenuDish) -> MenuDishAdminPublic
     )
 
 
+@router.get("/restaurants", response_model=list[MenuRestaurantPublic])
+def get_menu_restaurants(db: Session = Depends(get_db)):
+    """Публичный список ресторанов, у которых есть активные блюда (для вкладок меню)."""
+    rows = db.execute(
+        select(RestaurantCatalog.id, RestaurantCatalog.name)
+        .join(MenuDish, MenuDish.restaurant_id == RestaurantCatalog.id)
+        .where(MenuDish.is_active.is_(True))
+        .distinct()
+        .order_by(RestaurantCatalog.name.asc())
+    ).all()
+    return [MenuRestaurantPublic(id=str(row.id), name=row.name) for row in rows]
+
+
 @router.get("/categories", response_model=list[MenuCategoryPublic])
-def get_menu_categories(db: Session = Depends(get_db)):
-    categories = list(
-        db.scalars(
-            select(MenuCategory)
-            .where(MenuCategory.is_active.is_(True))
-            .order_by(MenuCategory.name.asc())
-        ).all()
-    )
+def get_menu_categories(
+    restaurant_id: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    category_query = select(MenuCategory).where(MenuCategory.is_active.is_(True))
+    restaurant_uuid = _parse_restaurant_uuid(restaurant_id)
+    if restaurant_uuid:
+        category_query = category_query.where(MenuCategory.restaurant_id == restaurant_uuid)
+    categories = list(db.scalars(category_query.order_by(MenuCategory.name.asc())).all())
     branch_ids = {cat.branch_id for cat in categories if cat.branch_id is not None}
     branches_by_id: dict[int, MenuBranch] = {}
     if branch_ids:
@@ -145,6 +160,7 @@ def get_menu_categories(db: Session = Depends(get_db)):
 @router.get("/feed", response_model=MenuFeedResponse)
 def get_menu_feed(
     category: str | None = Query(default=None),
+    restaurant_id: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -152,8 +168,15 @@ def get_menu_feed(
     dish_query = select(MenuDish).order_by(MenuDish.id.asc())
     count_query = select(func.count(MenuDish.id))
 
+    restaurant_uuid = _parse_restaurant_uuid(restaurant_id)
+    if restaurant_uuid:
+        dish_query = dish_query.where(MenuDish.restaurant_id == restaurant_uuid)
+        count_query = count_query.where(MenuDish.restaurant_id == restaurant_uuid)
+
     if category:
         cat_query = select(MenuCategory).where(func.lower(MenuCategory.name) == category.strip().lower())
+        if restaurant_uuid:
+            cat_query = cat_query.where(MenuCategory.restaurant_id == restaurant_uuid)
         cat = db.scalar(cat_query)
         if not cat:
             return MenuFeedResponse(total=0, items=[])

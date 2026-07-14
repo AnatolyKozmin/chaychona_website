@@ -2024,6 +2024,36 @@ tr:hover td {
   gap: 12px;
 }
 
+.notebook-restaurant-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 18px 0;
+}
+
+.notebook-restaurant-tab {
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid #dbe5f5;
+  background: #f8fbff;
+  color: #334155;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.notebook-restaurant-tab:hover {
+  border-color: #c5d4f0;
+  background: #f0f5ff;
+}
+
+.notebook-restaurant-tab.active {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
 .notebook-category-btn {
   width: 100%;
   margin: 0;
