@@ -968,6 +968,8 @@ onMounted(async () => {
         <h3>Созданные тесты</h3>
         <button type="button" class="ghost" @click="loadTests">Обновить</button>
       </div>
+      <p v-if="error" class="error" style="margin-top: 0">{{ error }}</p>
+      <p v-if="success" class="success" style="margin-top: 0">{{ success }}</p>
       <div class="test-search-row">
         <input
           v-model="testSearch"

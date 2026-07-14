@@ -22,6 +22,7 @@ from app.models.quiz import (
     QuizTest,
     QuizTestAssignment,
 )
+from app.models.course import Course
 from app.models.user import JobTitleCatalog, RestaurantCatalog, Role, User
 from app.schemas.quiz import (
     QuizAnalyticsResponse,
@@ -286,6 +287,11 @@ def delete_test(
     assignments = list(db.scalars(select(QuizTestAssignment).where(QuizTestAssignment.test_id == test.id)).all())
     for assignment in assignments:
         db.delete(assignment)
+
+    # Отвязываем тест от курсов «Стандартов», иначе внешний ключ не даст удалить.
+    linked_courses = list(db.scalars(select(Course).where(Course.linked_test_id == test.id)).all())
+    for course in linked_courses:
+        course.linked_test_id = None
 
     db.delete(test)
     db.commit()
