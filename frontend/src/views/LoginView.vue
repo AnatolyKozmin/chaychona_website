@@ -110,7 +110,7 @@ onMounted(() => {
       <input v-model="registerForm.desired_login" required />
       <label>Желаемый пароль</label>
       <input v-model="registerForm.password" type="password" required />
-      <p class="success" v-if="registrationSent.value">
+      <p class="muted" v-if="registrationSent.value">
         Заявка отправлена. После одобрения супер-админом можно войти.
       </p>
       <button type="submit" :disabled="auth.loading">Зарегистрироваться</button>

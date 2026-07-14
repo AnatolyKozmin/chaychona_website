@@ -281,85 +281,79 @@ defineExpose({ reload: load });
   width: 100%;
   box-sizing: border-box;
   padding: 10px 12px;
-  border: 1px solid var(--line-hard);
-  border-radius: var(--r);
-  font-size: 0.92rem;
-  color: var(--ink);
-  background: var(--surface);
+  border: 1px solid #cdd8ec;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #1e293b;
+  background: #fff;
   margin: 0;
 }
 .rrm-input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  border-color: var(--accent);
+  outline: none;
+  border-color: #2a4a8a;
+  box-shadow: 0 0 0 3px rgba(42, 74, 138, 0.15);
 }
 .rrm-input-lg {
-  font-size: 1.05rem;
+  font-size: 18px;
   font-weight: 600;
   padding: 12px 14px;
 }
 
 /* Кнопки */
 .rrm-btn {
-  border-radius: var(--r);
+  border-radius: 8px;
   padding: 10px 16px;
-  font-size: 0.9rem;
-  font-weight: 550;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
   border: 1px solid transparent;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 .rrm-btn-primary {
-  background: var(--ink);
-  color: var(--surface);
-  border-color: var(--ink);
+  background: #2a4a8a;
+  color: #fff;
 }
 .rrm-btn-primary:hover {
-  background: var(--n800);
-  border-color: var(--n800);
+  background: #213c72;
 }
 .rrm-btn-secondary {
-  background: var(--n100);
-  color: var(--ink);
-  border-color: var(--line-hard);
+  background: #e7edf9;
+  color: #2a4a8a;
 }
 .rrm-btn-secondary:hover {
-  background: var(--n150);
+  background: #d7e1f4;
 }
 .rrm-btn-ghost {
-  background: var(--surface);
-  border-color: var(--line-hard);
-  color: var(--ink);
+  background: #fff;
+  border-color: #cdd8ec;
+  color: #2a4a8a;
 }
 .rrm-btn-ghost:hover {
-  background: var(--n100);
+  background: #f3f6fc;
 }
 .rrm-btn-danger {
-  background: var(--surface);
-  border-color: var(--bad-line);
-  color: var(--bad);
+  background: #fff;
+  border-color: #f0c4c0;
+  color: #c0392b;
 }
 .rrm-btn-danger:hover {
-  background: var(--bad-bg);
+  background: #fceceb;
 }
 
 /* Блок добавления ресторана */
 .rrm-add-card {
-  border: 1px solid var(--line);
-  border-radius: var(--r);
+  border: 1px solid #e5ebf6;
+  border-radius: 12px;
   padding: 14px 16px;
-  background: var(--surface-2);
+  background: #f8faff;
 }
 .rrm-add-label,
 .rrm-edit-label {
   display: block;
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
   margin-bottom: 6px;
 }
 .rrm-add-row {
@@ -371,23 +365,20 @@ defineExpose({ reload: load });
 .rrm-msg {
   margin: 0;
   padding: 10px 12px;
-  border-radius: var(--r);
-  font-size: 0.9rem;
-  border: 1px solid;
+  border-radius: 8px;
+  font-size: 14px;
 }
 .rrm-msg-error {
-  background: var(--bad-bg);
-  color: var(--bad);
-  border-color: var(--bad-line);
+  background: #fceceb;
+  color: #c0392b;
 }
 .rrm-msg-success {
-  background: var(--good-bg);
-  color: var(--good);
-  border-color: var(--good-line);
+  background: #e6f6ec;
+  color: #1f8a4c;
 }
 .rrm-muted {
-  color: var(--muted);
-  font-size: 0.9rem;
+  color: #64748b;
+  font-size: 14px;
   margin: 0;
 }
 
@@ -395,17 +386,14 @@ defineExpose({ reload: load });
 .rrm-list {
   display: flex;
   flex-direction: column;
-  gap: 0;
-  border: 1px solid var(--line);
+  gap: 12px;
 }
 .rrm-card {
-  border: 0;
-  border-bottom: 1px solid var(--line-soft);
-  border-radius: 0;
+  border: 1px solid #e5ebf6;
+  border-radius: 12px;
   padding: 16px;
-  background: var(--surface);
+  background: #fff;
 }
-.rrm-card:last-child { border-bottom: 0; }
 .rrm-card-head {
   display: flex;
   align-items: center;
@@ -420,16 +408,14 @@ defineExpose({ reload: load });
   min-width: 0;
 }
 .rrm-title {
-  font-size: 1.05rem;
-  font-weight: 620;
-  color: var(--ink);
-  letter-spacing: -0.01em;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1e293b;
   word-break: break-word;
 }
 .rrm-count {
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  color: var(--muted);
+  font-size: 13px;
+  color: #94a3b8;
   white-space: nowrap;
 }
 .rrm-actions {
@@ -453,15 +439,12 @@ defineExpose({ reload: load });
 .rrm-roles {
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px dashed #e5ebf6;
 }
 .rrm-roles-label {
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
   margin-bottom: 8px;
 }
 .rrm-chips {
@@ -474,31 +457,28 @@ defineExpose({ reload: load });
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 6px 4px 10px;
-  border-radius: var(--r);
-  background: var(--n100);
-  color: var(--ink-2);
-  border: 1px solid var(--line);
-  font-size: 0.85rem;
+  padding: 5px 6px 5px 12px;
+  border-radius: 999px;
+  background: #e7edf9;
+  color: #2a4a8a;
+  font-size: 14px;
 }
 .rrm-chip-x {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border: none;
-  border-radius: var(--r);
+  border-radius: 999px;
   background: transparent;
-  color: var(--muted);
+  color: #2a4a8a;
   cursor: pointer;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1;
-  margin: 0;
-  padding: 0;
 }
 .rrm-chip-x:hover {
-  background: var(--bad);
+  background: #c0392b;
   color: #fff;
 }
 .rrm-add-role {

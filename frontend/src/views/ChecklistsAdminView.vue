@@ -404,7 +404,7 @@ onMounted(async () => {
             <th>Название</th>
             <th>Тип смены</th>
             <th>Для кого</th>
-            <th class="num">Пунктов</th>
+            <th>Пунктов</th>
             <th>Действия</th>
           </tr>
         </thead>
@@ -413,7 +413,7 @@ onMounted(async () => {
             <td>{{ cl.title }}</td>
             <td>{{ cl.shift_type_name ?? "—" }}</td>
             <td>{{ cl.restaurant_name ?? "Все" }} / {{ cl.job_title_name ?? "Все" }}</td>
-            <td class="num">{{ cl.items_count }}</td>
+            <td>{{ cl.items_count }}</td>
             <td>
               <button type="button" class="ghost" @click="startEdit(cl)">Редактировать</button>
               <button type="button" @click="deleteChecklist(cl.id)">Удалить</button>
@@ -473,26 +473,26 @@ onMounted(async () => {
         <template v-else>
           <div class="attempt-header-grid">
             <div class="clean-item">
-              <div class="k">Чек-лист</div>
-              <p style="margin: 6px 0 0 0; font-weight: 550">{{ selectedCompletion.checklist_title }}</p>
+              <strong>Чек-лист</strong>
+              <p style="margin: 6px 0 0 0">{{ selectedCompletion.checklist_title }}</p>
               <p v-if="selectedCompletion.shift_type_name" class="muted" style="margin: 2px 0 0 0">{{ selectedCompletion.shift_type_name }}</p>
             </div>
             <div class="clean-item">
-              <div class="k">Сотрудник</div>
-              <p style="margin: 6px 0 0 0; font-weight: 550">{{ selectedCompletion.user_name }}</p>
+              <strong>Сотрудник</strong>
+              <p style="margin: 6px 0 0 0">{{ selectedCompletion.user_name }}</p>
               <p class="muted" style="margin: 2px 0 0 0; font-size: 12px">{{ selectedCompletion.user_email }}</p>
               <p v-if="selectedCompletion.user_restaurant" class="muted" style="margin: 2px 0 0 0">{{ selectedCompletion.user_restaurant }}</p>
               <p v-if="selectedCompletion.user_job_title" class="muted" style="margin: 2px 0 0 0">{{ selectedCompletion.user_job_title }}</p>
             </div>
             <div class="clean-item">
-              <div class="k">Дата и время</div>
-              <p style="margin: 6px 0 0 0; font-variant-numeric: tabular-nums">{{ new Date(selectedCompletion.completed_at).toLocaleString("ru-RU") }}</p>
+              <strong>Дата и время</strong>
+              <p style="margin: 6px 0 0 0">{{ new Date(selectedCompletion.completed_at).toLocaleString("ru-RU") }}</p>
             </div>
           </div>
           <hr class="card-divider" />
           <h4 style="margin: 0 0 12px 0">Пункты</h4>
           <div class="attempt-result-list">
-            <div v-for="ic in selectedCompletion.item_completions" :key="ic.checklist_item_id" class="test-result-card">
+            <div v-for="ic in selectedCompletion.item_completions" :key="ic.checklist_item_id" class="test-result-card test-result-card--correct">
               <p class="test-result-question">{{ ic.checklist_item_title }}</p>
               <img
                 v-if="ic.photo_path"

@@ -11,8 +11,6 @@
     "test:watch": "NODE_OPTIONS=--no-webstorage vitest"
   },
   "dependencies": {
-    "@fontsource/ibm-plex-mono": "^5.2.7",
-    "@fontsource/ibm-plex-sans": "^5.2.8",
     "axios": "^1.9.0",
     "pinia": "^3.0.1",
     "vue": "^3.5.13",

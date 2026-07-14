@@ -909,7 +909,7 @@ useBodyScrollLock(computed(() => categoryModalOpen.value || dishModalOpen.value 
     <h2>Заполнение вкусной тетради</h2>
     <p class="muted">Фото и аудио обязательны по процессу. Видео можно прикрепить отдельно (если уже собрано).</p>
     <p v-if="adminError" class="error">{{ adminError }}</p>
-    <p v-if="adminSuccess" class="success">{{ adminSuccess }}</p>
+    <p v-if="adminSuccess" class="muted">{{ adminSuccess }}</p>
 
     <div class="card">
       <div class="category-actions-header">

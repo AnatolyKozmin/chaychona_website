@@ -195,17 +195,6 @@ function scorePercent(item: { total_questions: number; correct_answers: number }
   return Math.round((item.correct_answers / item.total_questions) * 100);
 }
 
-/** Единая шкала порогов результата: ≥80 норма, 50–79 пограничный, <50 провал. */
-function scoreClass(percent: number): "good" | "warn" | "bad" {
-  if (percent >= 80) {
-    return "good";
-  }
-  if (percent >= 50) {
-    return "warn";
-  }
-  return "bad";
-}
-
 async function startTest(testId: number) {
   loading.value = true;
   error.value = "";
@@ -275,16 +264,8 @@ useBodyScrollLock(computed(() => attemptsModalOpen.value));
     </div>
 
     <div v-if="tab === 'available' && !hasActiveTest">
-      <div v-if="loading" class="test-card-grid" aria-busy="true">
-        <div v-for="n in 4" :key="n" class="test-card">
-          <div class="skeleton skeleton-line" style="width: 55%"></div>
-          <div class="skeleton skeleton-line" style="width: 35%"></div>
-        </div>
-      </div>
-      <div v-else-if="tests.length === 0" class="empty-state">
-        <p class="empty-state-title">Пока нет доступных тестов</p>
-        <p>Тесты появятся здесь, когда их назначат на вашу должность.</p>
-      </div>
+      <p v-if="loading">Загрузка...</p>
+      <p v-else-if="tests.length === 0" class="muted">Для вас пока нет доступных тестов.</p>
       <div v-else class="test-card-grid">
         <button
           v-for="test in tests"
@@ -352,25 +333,13 @@ useBodyScrollLock(computed(() => attemptsModalOpen.value));
       </template>
 
       <template v-else>
-        <h3 style="margin: 4px 0 12px">Результат</h3>
-        <div class="stat-row">
-          <div class="stat-cell">
-            <div class="k">Результат</div>
-            <div class="v">{{ scorePercent(result) }}<span class="unit">%</span></div>
-            <div class="d"><span class="badge" :class="scoreClass(scorePercent(result))">{{ result.correct_answers }}/{{ result.total_questions }}</span></div>
-          </div>
-          <div class="stat-cell">
-            <div class="k">Правильно</div>
-            <div class="v">{{ result.correct_answers }}</div>
-          </div>
-          <div class="stat-cell">
-            <div class="k">Неправильно</div>
-            <div class="v">{{ result.incorrect_answers }}</div>
-          </div>
-          <div v-if="result.duration_seconds !== null" class="stat-cell">
-            <div class="k">Время</div>
-            <div class="v">{{ result.duration_seconds }}<span class="unit"> сек</span></div>
-          </div>
+        <div class="test-summary-card">
+          <h3 style="margin-top: 0">Результат</h3>
+          <p><strong>Всего вопросов:</strong> {{ result.total_questions }}</p>
+          <p><strong>Правильно:</strong> {{ result.correct_answers }}</p>
+          <p><strong>Неправильно:</strong> {{ result.incorrect_answers }}</p>
+          <p><strong>Процент:</strong> {{ scorePercent(result) }}%</p>
+          <p v-if="result.duration_seconds !== null"><strong>Время прохождения:</strong> {{ result.duration_seconds }} сек.</p>
         </div>
 
         <div
@@ -405,25 +374,21 @@ useBodyScrollLock(computed(() => attemptsModalOpen.value));
         <input v-model="attemptsQuery" placeholder="Поиск: тест, ресторан, должность" />
         <button type="button" class="ghost" :disabled="attemptsLoading" @click="loadMyAttempts">Обновить</button>
       </div>
-      <div v-if="attemptsLoading" aria-busy="true">
-        <div v-for="n in 3" :key="n" class="attempt-card">
-          <div class="skeleton skeleton-line" style="width: 45%"></div>
-          <div class="skeleton skeleton-line" style="width: 30%"></div>
-        </div>
-      </div>
+      <p v-if="attemptsLoading">Загрузка...</p>
       <p v-else-if="filteredAttempts.length === 0" class="muted">Прохождений пока нет.</p>
       <div v-else class="clean-list">
         <div v-for="attempt in filteredAttempts" :key="attempt.id" class="attempt-card">
           <div class="actions-row">
             <strong class="long-text">{{ attempt.test_title }}</strong>
-            <span class="badge" :class="scoreClass(scorePercent(attempt))">
-              {{ scorePercent(attempt) }}% · {{ attempt.correct_answers }}/{{ attempt.total_questions }}
+            <span class="result-pill" :class="scorePercent(attempt) >= 70 ? 'result-pill-success' : 'result-pill-error'">
+              {{ scorePercent(attempt) }}%
             </span>
           </div>
-          <p class="muted" style="margin: 6px 0 0 0">{{ attempt.user_restaurant || "—" }}</p>
+          <p class="muted" style="margin: 6px 0 0 0">{{ attempt.user_restaurant || "-" }}</p>
           <p class="muted" style="margin: 6px 0 0 0">
-            {{ attempt.duration_seconds ?? "—" }} сек · {{ new Date(attempt.finished_at).toLocaleString("ru-RU") }}
+            {{ attempt.correct_answers }}/{{ attempt.total_questions }} • {{ attempt.duration_seconds ?? "-" }} сек.
           </p>
+          <p class="muted" style="margin: 6px 0 0 0">{{ new Date(attempt.finished_at).toLocaleString() }}</p>
           <button type="button" class="ghost" style="margin-top: 8px" @click="openAttemptDetails(attempt.id)">Подробнее</button>
         </div>
       </div>
@@ -439,20 +404,19 @@ useBodyScrollLock(computed(() => attemptsModalOpen.value));
       </div>
       <div class="attempt-header-grid">
         <div class="clean-item">
-          <div class="k">Тест</div>
-          <p style="margin: 6px 0 0 0; font-weight: 550">{{ selectedAttemptDetail.attempt.test_title }}</p>
+          <strong>Тест</strong>
+          <p style="margin: 6px 0 0 0">{{ selectedAttemptDetail.attempt.test_title }}</p>
         </div>
         <div class="clean-item">
-          <div class="k">Результат</div>
+          <strong>Результат</strong>
           <p style="margin: 6px 0 0 0">
-            <span class="badge" :class="scoreClass(scorePercent(selectedAttemptDetail.attempt))">
-              {{ scorePercent(selectedAttemptDetail.attempt) }}% · {{ selectedAttemptDetail.attempt.correct_answers }}/{{ selectedAttemptDetail.attempt.total_questions }}
-            </span>
+            {{ selectedAttemptDetail.attempt.correct_answers }}/{{ selectedAttemptDetail.attempt.total_questions }}
+            ({{ scorePercent(selectedAttemptDetail.attempt) }}%)
           </p>
         </div>
         <div class="clean-item">
-          <div class="k">Время</div>
-          <p style="margin: 6px 0 0 0; font-variant-numeric: tabular-nums">{{ selectedAttemptDetail.attempt.duration_seconds ?? "—" }} сек</p>
+          <strong>Время</strong>
+          <p style="margin: 6px 0 0 0">{{ selectedAttemptDetail.attempt.duration_seconds ?? "-" }} сек.</p>
         </div>
       </div>
 

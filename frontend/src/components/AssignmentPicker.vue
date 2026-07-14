@@ -97,10 +97,10 @@ const selectedCount = computed(() => props.modelValue.length);
 
 <style scoped>
 .ap-restaurant {
-  border: 1px solid var(--line);
-  border-radius: var(--r);
+  border: 1px solid #e5ebf6;
+  border-radius: 10px;
   padding: 10px 14px;
-  background: var(--surface-2);
+  background: #f8faff;
   margin-bottom: 10px;
 }
 .ap-restaurant-head {
@@ -111,16 +111,15 @@ const selectedCount = computed(() => props.modelValue.length);
   margin-bottom: 8px;
 }
 .ap-restaurant-name {
-  font-weight: 620;
-  color: var(--ink);
+  font-weight: 600;
+  color: #1e293b;
 }
 .ap-toggle-all {
-  font-size: 0.8rem;
+  font-size: 13px;
   padding: 2px 8px;
 }
 .ap-no-roles {
-  font-size: 0.8rem;
-  color: var(--muted);
+  font-size: 13px;
 }
 .ap-roles {
   display: flex;
@@ -132,8 +131,8 @@ const selectedCount = computed(() => props.modelValue.length);
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  font-size: 0.9rem;
-  color: var(--ink-2);
+  font-size: 14px;
+  color: #2a4a8a;
 }
 .ap-role input {
   margin: 0;
