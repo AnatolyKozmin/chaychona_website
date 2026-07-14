@@ -117,6 +117,11 @@ const filterRestaurant = ref("");
 const filterRole = ref("");
 const filterUser = ref("");
 
+type AnalyticsTab = "overview" | "scores" | "attempts" | "questions" | "users";
+const activeTab = ref<AnalyticsTab>("overview");
+const scoreView = ref<"byTest" | "matrix">("byTest");
+const selectedTestId = ref<number | null>(null);
+
 function formatDate(value: string | null): string {
   if (!value) {
     return "-";
@@ -197,6 +202,32 @@ function scoreCellClass(cell: ScoreboardCell): string {
   return "score-cell--bad";
 }
 
+/** Все тесты для селектора вкладки «Баллы → По тесту». */
+const allScoreboardTests = computed(() => scoreboard.value?.tests ?? []);
+
+const selectedTest = computed(
+  () => allScoreboardTests.value.find((t) => t.id === selectedTestId.value) ?? null
+);
+
+/** Рейтинг сотрудников по выбранному тесту (только сдавшие), отсортированный по убыванию. */
+const perTestRows = computed(() => {
+  if (selectedTestId.value == null) {
+    return [] as Array<{ user: ScoreboardUser; cell: ScoreboardCell }>;
+  }
+  return filteredScoreboardUsers.value
+    .map((user) => ({ user, cell: scoreboardCell(user, selectedTestId.value!) }))
+    .filter((row): row is { user: ScoreboardUser; cell: ScoreboardCell } => row.cell !== null)
+    .sort((a, b) => cellPercent(b.cell) - cellPercent(a.cell));
+});
+
+/** Сотрудники (в текущем фильтре), которые выбранный тест ещё не проходили. */
+const perTestNotTaken = computed(() => {
+  if (selectedTestId.value == null) {
+    return [] as ScoreboardUser[];
+  }
+  return filteredScoreboardUsers.value.filter((user) => !scoreboardCell(user, selectedTestId.value!));
+});
+
 const filteredAttempts = computed(() => {
   const source = analytics.value?.attempts ?? [];
   const nameQuery = filterUser.value.trim().toLowerCase();
@@ -224,10 +255,17 @@ async function loadAnalytics() {
     ]);
     analytics.value = analyticsResp.data;
     scoreboard.value = scoreboardResp.data;
+    if (selectedTestId.value == null || !scoreboardResp.data.tests.some((t) => t.id === selectedTestId.value)) {
+      selectedTestId.value = scoreboardResp.data.tests[0]?.id ?? null;
+    }
     filterRestaurant.value = "";
     filterRole.value = "";
     filterUser.value = (route.query.user as string) || "";
     scoreFilterUser.value = (route.query.user as string) || "";
+    // Пришли по ссылке из карточки сотрудника — открываем список прохождений с фильтром.
+    if (route.query.user) {
+      activeTab.value = "attempts";
+    }
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "Не удалось загрузить аналитику";
   } finally {
@@ -274,7 +312,15 @@ onMounted(async () => {
     <p v-if="loading">Загрузка...</p>
 
     <template v-if="analytics && !loading">
-      <div class="card">
+      <div class="tests-tabs" role="tablist">
+        <button type="button" class="tests-tab" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">Обзор</button>
+        <button type="button" class="tests-tab" :class="{ active: activeTab === 'scores' }" @click="activeTab = 'scores'">Баллы по тестам</button>
+        <button type="button" class="tests-tab" :class="{ active: activeTab === 'attempts' }" @click="activeTab = 'attempts'">Прохождения</button>
+        <button type="button" class="tests-tab" :class="{ active: activeTab === 'questions' }" @click="activeTab = 'questions'">Проблемные вопросы</button>
+        <button type="button" class="tests-tab" :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'">Ошибки по людям</button>
+      </div>
+
+      <div v-if="activeTab === 'overview'" class="card">
         <h3>Сводка</h3>
         <p><strong>Всего прохождений:</strong> {{ analytics.summary.total_attempts }}</p>
         <p><strong>Уникальных пользователей:</strong> {{ analytics.summary.unique_users }}</p>
@@ -282,9 +328,12 @@ onMounted(async () => {
         <p v-if="analytics.summary.avg_duration_seconds !== null">
           <strong>Среднее время:</strong> {{ analytics.summary.avg_duration_seconds.toFixed(1) }} сек.
         </p>
+        <p class="muted" style="margin-top: 14px">
+          Разделы вынесены во вкладки выше. «Баллы по тестам» удобнее смотреть в режиме «По тесту» — рейтинг сотрудников по одному тесту без горизонтальной прокрутки.
+        </p>
       </div>
 
-      <div class="card">
+      <div v-if="activeTab === 'scores'" class="card">
         <div class="actions-row" style="flex-wrap: wrap; gap: 10px">
           <h3 style="margin: 0">Баллы по тестам</h3>
           <div class="score-mode-toggle">
@@ -305,10 +354,25 @@ onMounted(async () => {
               Последний результат
             </button>
           </div>
+          <div class="score-mode-toggle">
+            <button
+              type="button"
+              class="score-mode-btn"
+              :class="{ 'score-mode-btn--active': scoreView === 'byTest' }"
+              @click="scoreView = 'byTest'"
+            >
+              По тесту
+            </button>
+            <button
+              type="button"
+              class="score-mode-btn"
+              :class="{ 'score-mode-btn--active': scoreView === 'matrix' }"
+              @click="scoreView = 'matrix'"
+            >
+              Матрица
+            </button>
+          </div>
         </div>
-        <p class="muted" style="margin: 8px 0 12px 0">
-          Все сотрудники и их баллы по каждому тесту в одной таблице. Наведите на ячейку, чтобы увидеть число попыток и дату.
-        </p>
         <div class="analytics-filters">
           <div>
             <label>Ресторан</label>
@@ -331,7 +395,59 @@ onMounted(async () => {
         </div>
         <p v-if="!scoreboard || scoreboard.users.length === 0" class="muted">Пока никто не проходил тесты.</p>
         <p v-else-if="filteredScoreboardUsers.length === 0" class="muted">По выбранным фильтрам нет данных.</p>
-        <div v-else class="table-wrap">
+
+        <!-- Разрез по одному тесту: рейтинг сотрудников, нормальная ширина -->
+        <template v-else-if="scoreView === 'byTest'">
+          <div style="max-width: 460px; margin: 4px 0 14px">
+            <label>Тест</label>
+            <select v-model.number="selectedTestId">
+              <option v-for="t in allScoreboardTests" :key="t.id" :value="t.id">{{ t.title }}</option>
+            </select>
+          </div>
+          <p v-if="perTestRows.length === 0" class="muted">Этот тест пока никто не проходил (по текущим фильтрам).</p>
+          <div v-else class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 44px">#</th>
+                  <th>Сотрудник</th>
+                  <th>Ресторан / роль</th>
+                  <th>Результат ({{ scoreMode === 'best' ? 'лучший' : 'последний' }})</th>
+                  <th>Попыток</th>
+                  <th>Последняя попытка</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, idx) in perTestRows" :key="row.user.user_id">
+                  <td class="muted">{{ idx + 1 }}</td>
+                  <td>
+                    <div>{{ row.user.user_name }}</div>
+                    <div class="muted" style="font-size: 12px">{{ row.user.user_email }}</div>
+                  </td>
+                  <td>{{ row.user.user_restaurant || "-" }} / {{ row.user.user_job_title || "-" }}</td>
+                  <td>
+                    <span class="score-badge" :class="scoreCellClass(row.cell)">
+                      {{ cellScoreText(row.cell) }}
+                      <span class="score-badge-percent">{{ cellPercent(row.cell).toFixed(0) }}%</span>
+                    </span>
+                  </td>
+                  <td>{{ row.cell.attempts_count }}</td>
+                  <td>{{ formatDate(row.cell.last_finished_at) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-if="selectedTest && perTestNotTaken.length" class="muted" style="margin-top: 10px">
+            Не проходили «{{ selectedTest.title }}»: {{ perTestNotTaken.length }} чел.
+          </p>
+        </template>
+
+        <!-- Полная матрица: все тесты сразу (широкая, прокрутка по горизонтали) -->
+        <template v-else>
+          <p class="muted" style="margin: 0 0 12px 0">
+            Все сотрудники и их баллы по каждому тесту сразу. Таблица широкая — прокручивается по горизонтали. Наведите на ячейку, чтобы увидеть число попыток и дату.
+          </p>
+          <div class="table-wrap">
           <table class="scoreboard-table">
             <thead>
               <tr>
@@ -373,10 +489,11 @@ onMounted(async () => {
               </tr>
             </tbody>
           </table>
-        </div>
+          </div>
+        </template>
       </div>
 
-      <div class="card">
+      <div v-if="activeTab === 'attempts'" class="card">
         <h3>5 последних прохождений</h3>
         <p v-if="analytics.recent_attempts.length === 0" class="muted">Пока нет прохождений.</p>
         <div v-else class="table-wrap">
@@ -407,7 +524,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="card">
+      <div v-if="activeTab === 'questions'" class="card">
         <h3>Проблемные вопросы</h3>
         <div class="table-wrap">
           <table>
@@ -433,7 +550,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="card">
+      <div v-if="activeTab === 'users'" class="card">
         <h3>Кто где ошибается</h3>
         <div class="table-wrap">
           <table>
@@ -464,7 +581,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="card">
+      <div v-if="activeTab === 'attempts'" class="card">
         <h3>Все прохождения</h3>
         <div class="analytics-filters">
           <div>
@@ -490,20 +607,17 @@ onMounted(async () => {
           <table>
             <thead>
               <tr>
-                <th>ID</th>
                 <th>Пользователь</th>
                 <th>Ресторан / роль</th>
                 <th>Тест</th>
                 <th>Результат</th>
-                <th>Время</th>
-                <th>Начало</th>
-                <th>Окончание</th>
+                <th>Время, с</th>
+                <th>Когда</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="attempt in filteredAttempts" :key="attempt.id">
-                <td>{{ attempt.id }}</td>
                 <td>
                   <div>{{ attempt.user_name }}</div>
                   <div class="muted" style="font-size: 12px">{{ attempt.user_email }}</div>
@@ -512,14 +626,13 @@ onMounted(async () => {
                 <td>{{ attempt.test_title }}</td>
                 <td>{{ attempt.correct_answers }}/{{ attempt.total_questions }}</td>
                 <td>{{ attempt.duration_seconds ?? "-" }}</td>
-                <td>{{ formatDate(attempt.started_at) }}</td>
                 <td>{{ formatDate(attempt.finished_at) }}</td>
                 <td>
                   <button type="button" class="ghost" @click="openAttemptDetail(attempt.id)">Открыть</button>
                 </td>
               </tr>
               <tr v-if="filteredAttempts.length === 0">
-                <td colspan="9" class="muted">По выбранным фильтрам нет данных.</td>
+                <td colspan="7" class="muted">По выбранным фильтрам нет данных.</td>
               </tr>
             </tbody>
           </table>
