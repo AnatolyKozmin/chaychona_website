@@ -30,10 +30,11 @@
   --bad:   #b23225;  --bad-bg: #f6e7e4;  --bad-line:#e6c2bb;
 
   /* --- Семантические токены (свет) --- */
-  --bg:        var(--n50);
-  --surface:   var(--n0);
-  --surface-2: var(--n50);
-  --ink:       var(--n900);
+  /* Мягкий тёплый «бумажный» белый вместо резкого #fff — ниже контраст. */
+  --bg:        #eeebe4;
+  --surface:   #faf8f4;
+  --surface-2: #f3f0e9;
+  --ink:       #23201a;
   --ink-2:     var(--n700);
   --muted:     var(--n500);
   --faint:     var(--n400);
@@ -1008,7 +1009,7 @@ th.num, td.num {
 .people-card-arrow { color: var(--faint); font-size: 1.05rem; }
 
 /* ---------- Вкусная тетрадь ---------- */
-.notebook-category-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0; border: 1px solid var(--line); }
+.notebook-category-grid { display: flex; flex-wrap: wrap; gap: 8px; border: 0; }
 .notebook-restaurant-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 0 var(--s4) 0; border-bottom: 1px solid var(--line); }
 .notebook-restaurant-tab {
   padding: 9px 14px; border-radius: 0; border: 0; border-bottom: 2px solid transparent;
@@ -1019,11 +1020,11 @@ th.num, td.num {
 .notebook-restaurant-tab.active { border-color: transparent; background: transparent; color: var(--ink); border-bottom-color: var(--accent); font-weight: 550; }
 
 .notebook-category-btn {
-  width: 100%; margin: 0; padding: var(--s4) var(--s4); text-align: left; font-weight: 550; font-size: 0.95rem;
-  border-radius: 0; border: 0; border-right: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft);
-  background: var(--surface); color: var(--ink); cursor: pointer; transition: background 0.12s ease;
+  width: auto; margin: 0; padding: 9px 16px; text-align: center; font-weight: 500; font-size: 0.9rem;
+  border-radius: 0; border: 1px solid var(--line-hard); white-space: nowrap;
+  background: var(--surface); color: var(--ink); cursor: pointer; transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
 }
-.notebook-category-btn:hover { border-color: var(--line-soft); background: var(--surface-2); box-shadow: none; }
+.notebook-category-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--surface); box-shadow: none; }
 .notebook-back-row { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s4); }
 .notebook-back-btn { flex-shrink: 0; padding: 8px 12px; }
 .notebook-category-title { font-size: 1.05rem; font-weight: 620; color: var(--ink); letter-spacing: -0.01em; }
