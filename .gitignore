@@ -9,3 +9,9 @@ backend/.venv/
 backend/.vendor/
 frontend/node_modules/
 frontend/dist/
+
+# Локальный источник для разовой заливки блюд (не в репозиторий, ~200 МБ)
+/audio/
+/dish_photos/
+/images/
+/ЖУ_Вкусная_тетрадь_реестр.xlsx

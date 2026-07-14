@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     bootstrap_superadmin_password: str = Field(alias="BOOTSTRAP_SUPERADMIN_PASSWORD")
     content_export_root: str | None = Field(default=None, alias="CONTENT_EXPORT_ROOT")
 
+    # Фоновая генерация видео блюд (фото + озвучка → mp4 через ffmpeg)
+    ffmpeg_binary: str = Field(default="ffmpeg", alias="FFMPEG_BINARY")
+    video_worker_enabled: bool = Field(default=True, alias="VIDEO_WORKER_ENABLED")
+    video_worker_poll_seconds: float = Field(default=3.0, alias="VIDEO_WORKER_POLL_SECONDS")
+    video_worker_timeout_seconds: int = Field(default=600, alias="VIDEO_WORKER_TIMEOUT_SECONDS")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

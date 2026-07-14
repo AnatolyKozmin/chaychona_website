@@ -71,3 +71,27 @@ class MenuDish(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
+
+
+class MenuDishVideoJob(Base):
+    """Очередь фоновой генерации видео блюда (фото ингредиентов + озвучка → mp4).
+
+    Обрабатывается воркером `app.services.video_worker`. Статусы:
+    `pending` → `processing` → `done` | `error`.
+    """
+
+    __tablename__ = "menu_dish_video_jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    dish_id: Mapped[int] = mapped_column(
+        ForeignKey("menu_dishes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -25,6 +25,7 @@ from app.models import menu as _menu_models  # noqa: F401
 from app.models import quiz as _quiz_models  # noqa: F401
 from app.models.checklist import ShiftType
 from app.models.user import RestaurantCatalog, Role, User
+from app.services.video_worker import start_video_worker, stop_video_worker
 
 settings = get_settings()
 
@@ -322,7 +323,11 @@ def _run_startup() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _run_startup()
-    yield
+    start_video_worker()
+    try:
+        yield
+    finally:
+        stop_video_worker()
 
 
 app = FastAPI(title="Restaurant Training API", lifespan=lifespan)

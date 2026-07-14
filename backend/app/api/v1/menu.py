@@ -1,13 +1,13 @@
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.db.session import get_db
-from app.models.menu import MenuBranch, MenuCategory, MenuDish
+from app.models.menu import MenuBranch, MenuCategory, MenuDish, MenuDishVideoJob
 from app.models.user import RestaurantCatalog, Role, User
 from app.schemas.menu import (
     MenuBranchCreate,
@@ -18,12 +18,24 @@ from app.schemas.menu import (
     MenuDishAdminPublic,
     MenuDishCard,
     MenuDishCreate,
+    MenuDishImportJobResponse,
+    MenuDishJobPublic,
+    MenuDishJobsSummary,
     MenuFeedResponse,
     MenuMediaUploadResponse,
+    GenerateVideosRequest,
+    GenerateVideosResponse,
+)
+from app.services.media import (
+    ALLOWED_MEDIA_EXTS,
+    AUDIO_EXTS,
+    IMAGE_EXTS,
+    UPLOAD_DIR,
+    save_upload_bytes,
 )
 
 router = APIRouter(prefix="/menu", tags=["menu"])
-UPLOAD_ROOT = Path(__file__).resolve().parents[3] / "media_uploads" / "uploads"
+UPLOAD_ROOT = UPLOAD_DIR
 MAX_MEDIA_SIZE_BYTES = 200 * 1024 * 1024
 
 
@@ -478,26 +490,305 @@ def delete_dish_admin(
     db.commit()
 
 
+async def _store_upload(file: UploadFile, allowed_exts: set[str], label: str) -> str:
+    """Провалидировать и сохранить загруженный файл, вернуть относительный путь."""
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in allowed_exts:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Неподдерживаемый тип файла для «{label}»",
+        )
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Файл «{label}» пустой")
+    if len(content) > MAX_MEDIA_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Файл «{label}» слишком большой (максимум 200 МБ)",
+        )
+    return save_upload_bytes(content, suffix)
+
+
 @router.post("/admin/media", response_model=MenuMediaUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_media_admin(
     file: UploadFile = File(...),
     _: User = Depends(require_roles(Role.SUPERADMIN)),
 ):
-    UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-    suffix = Path(file.filename or "").suffix.lower()
-    allowed = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp3", ".wav", ".ogg", ".mp4", ".webm", ".m4a"}
-    if suffix not in allowed:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неподдерживаемый тип файла")
-    file_name = f"{uuid.uuid4().hex}{suffix}"
-    target_path = UPLOAD_ROOT / file_name
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пустой")
-    if len(content) > MAX_MEDIA_SIZE_BYTES:
+    path = await _store_upload(file, ALLOWED_MEDIA_EXTS, "медиа")
+    return MenuMediaUploadResponse(path=path)
+
+
+def _build_dish_job_public(job: MenuDishVideoJob, dish: MenuDish | None = None) -> MenuDishJobPublic:
+    return MenuDishJobPublic(
+        id=job.id,
+        dish_id=job.dish_id,
+        dish_name=dish.name if dish else None,
+        status=job.status,
+        error=job.error,
+        attempts=job.attempts,
+        video_path=dish.video_path if dish else None,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
+
+@router.post(
+    "/admin/dishes/import-job",
+    response_model=MenuDishImportJobResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def import_dish_job(
+    name: str = Form(...),
+    ingredients: str | None = Form(None),
+    description: str | None = Form(None),
+    price: int | None = Form(None),
+    price_rubles: str | None = Form(None),
+    category_id: int | None = Form(None),
+    restaurant_id: str | None = Form(None),
+    is_available: bool = Form(True),
+    is_active: bool = Form(True),
+    source_dish_key: str | None = Form(None),
+    match_by_name: bool = Form(False),
+    generate_video: bool = Form(True),
+    photo_dish: UploadFile | None = File(None),
+    photo_ingredients: UploadFile | None = File(None),
+    audio: UploadFile | None = File(None),
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Пачечная загрузка блюда (multipart) + постановка видео в очередь.
+
+    Одно блюдо на запрос: текстовые поля + фото/аудио. Блюдо ищется по
+    `source_dish_key`, а если его нет и `match_by_name=true` — по точному имени
+    (в пределах ресторана); иначе создаётся новое. Текстовые поля со значением
+    `None` НЕ затирают существующие (частичное обновление). Файлы обновляются
+    только если переданы. При `generate_video=true` ставится задание на склейку
+    видео из фото ингредиентов и озвучки — считает воркер.
+    """
+    if not name.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Пустое название блюда")
+
+    category = db.get(MenuCategory, category_id) if category_id else None
+    if category_id and not category:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Категория не найдена")
+
+    restaurant_uuid = _parse_restaurant_uuid(restaurant_id)
+    if restaurant_uuid and not db.get(RestaurantCatalog, restaurant_uuid):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ресторан не найден")
+    if category and category.restaurant_id and restaurant_uuid and category.restaurant_id != restaurant_uuid:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Файл слишком большой (максимум 200 МБ)",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Категория относится к другому ресторану",
         )
-    target_path.write_bytes(content)
-    return MenuMediaUploadResponse(path=f"uploads/{file_name}")
+    if category and category.restaurant_id and not restaurant_uuid:
+        restaurant_uuid = category.restaurant_id
+
+    # Файлы сохраняем ДО записи в БД — при ошибке валидации блюдо не создаётся.
+    photo_dish_path = await _store_upload(photo_dish, IMAGE_EXTS, "фото блюда") if photo_dish else None
+    photo_ingredients_path = (
+        await _store_upload(photo_ingredients, IMAGE_EXTS, "фото ингредиентов") if photo_ingredients else None
+    )
+    audio_path = await _store_upload(audio, AUDIO_EXTS, "аудио") if audio else None
+
+    key = source_dish_key.strip() if source_dish_key and source_dish_key.strip() else None
+    dish = db.scalar(select(MenuDish).where(MenuDish.source_dish_key == key)) if key else None
+    if dish is None and match_by_name:
+        name_query = select(MenuDish).where(func.lower(MenuDish.name) == name.strip().lower())
+        if restaurant_uuid:
+            name_query = name_query.where(MenuDish.restaurant_id == restaurant_uuid)
+        dish = db.scalar(name_query.order_by(MenuDish.id.asc()))
+
+    if dish is None:
+        dish = MenuDish(name=name.strip(), source_dish_key=key)
+        db.add(dish)
+    elif key and not dish.source_dish_key:
+        dish.source_dish_key = key  # закрепить ключ за найденным по имени блюдом
+
+    dish.name = name.strip()
+    # None не затирает существующее значение (частичное обновление при повторной заливке).
+    if ingredients is not None:
+        dish.ingredients = ingredients.strip() or None
+    if description is not None:
+        dish.description = description.strip() or None
+    if price is not None:
+        dish.price = price if price > 0 else 0
+    if price_rubles is not None:
+        dish.price_rubles = price_rubles.strip() or None
+    if category_id is not None:
+        dish.category_id = category_id
+    if restaurant_uuid:
+        dish.restaurant_id = restaurant_uuid
+    dish.is_available = is_available
+    dish.is_active = is_active
+    # Пути обновляем только если пришёл новый файл (иначе оставляем прежние).
+    if photo_dish_path is not None:
+        dish.photo_dish_path = photo_dish_path
+    if photo_ingredients_path is not None:
+        dish.photo_ingredients_path = photo_ingredients_path
+    if audio_path is not None:
+        dish.audio_path = audio_path
+
+    # Проверяем достаточность медиа ДО commit — иначе при 400 осталось бы
+    # наполовину созданное блюдо (сессия откатывается на выходе из get_db).
+    if generate_video:
+        have_photo = bool(dish.photo_ingredients_path or dish.photo_dish_path)
+        have_audio = bool(dish.audio_path)
+        if not have_photo or not have_audio:
+            missing = []
+            if not have_photo:
+                missing.append("фото")
+            if not have_audio:
+                missing.append("аудио")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Для генерации видео не хватает: {', '.join(missing)}",
+            )
+
+    db.commit()
+    db.refresh(dish)
+
+    job: MenuDishVideoJob | None = None
+    if generate_video:
+        job = MenuDishVideoJob(dish_id=dish.id, status="pending")
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+    return MenuDishImportJobResponse(
+        dish=_build_dish_admin_public(db, dish),
+        job=_build_dish_job_public(job, dish) if job else None,
+    )
+
+
+@router.get("/admin/dishes/import-jobs", response_model=MenuDishJobsSummary)
+def list_import_jobs(
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=200, ge=1, le=1000),
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    counts = dict(
+        db.execute(
+            select(MenuDishVideoJob.status, func.count(MenuDishVideoJob.id)).group_by(MenuDishVideoJob.status)
+        ).all()
+    )
+    query = select(MenuDishVideoJob).order_by(MenuDishVideoJob.id.desc())
+    if status_filter:
+        query = query.where(MenuDishVideoJob.status == status_filter)
+    jobs = list(db.scalars(query.limit(limit)).all())
+    dish_ids = {job.dish_id for job in jobs}
+    dishes_by_id: dict[int, MenuDish] = {}
+    if dish_ids:
+        dishes = list(db.scalars(select(MenuDish).where(MenuDish.id.in_(dish_ids))).all())
+        dishes_by_id = {dish.id: dish for dish in dishes}
+    return MenuDishJobsSummary(
+        pending=int(counts.get("pending", 0)),
+        processing=int(counts.get("processing", 0)),
+        done=int(counts.get("done", 0)),
+        error=int(counts.get("error", 0)),
+        total=sum(int(v) for v in counts.values()),
+        jobs=[_build_dish_job_public(job, dishes_by_id.get(job.dish_id)) for job in jobs],
+    )
+
+
+def _dish_has_media(dish: MenuDish) -> bool:
+    return bool((dish.photo_ingredients_path or dish.photo_dish_path) and dish.audio_path)
+
+
+def _active_video_dish_ids(db: Session, dish_ids: set[int] | None = None) -> set[int]:
+    """id блюд, у которых уже есть незавершённое задание (pending/processing)."""
+    query = select(MenuDishVideoJob.dish_id).where(
+        MenuDishVideoJob.status.in_(("pending", "processing"))
+    )
+    if dish_ids is not None:
+        if not dish_ids:
+            return set()
+        query = query.where(MenuDishVideoJob.dish_id.in_(dish_ids))
+    return set(db.scalars(query).all())
+
+
+@router.post("/admin/dishes/generate-videos", response_model=GenerateVideosResponse)
+def generate_videos_bulk(
+    payload: GenerateVideosRequest,
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Массово поставить генерацию видео для существующих блюд.
+
+    По умолчанию берёт блюда с фото + аудио, но БЕЗ видео, и ставит их в
+    очередь (воркер склеит). `force=true` — пересоздать даже там, где видео
+    уже есть. Блюда с активным заданием пропускаются (без дублей).
+    """
+    query = select(MenuDish).order_by(MenuDish.id.asc())
+    if payload.restaurant_id:
+        query = query.where(MenuDish.restaurant_id == _parse_restaurant_uuid(payload.restaurant_id))
+    if payload.category_id is not None:
+        query = query.where(MenuDish.category_id == payload.category_id)
+    if payload.dish_ids:
+        query = query.where(MenuDish.id.in_(payload.dish_ids))
+    dishes = list(db.scalars(query).all())
+
+    active_ids = _active_video_dish_ids(db, {dish.id for dish in dishes})
+
+    enqueued = skipped_no_media = skipped_has_video = skipped_already_queued = 0
+    new_jobs: list[MenuDishVideoJob] = []
+    for dish in dishes:
+        if not _dish_has_media(dish):
+            skipped_no_media += 1
+            continue
+        if dish.video_path and not payload.force:
+            skipped_has_video += 1
+            continue
+        if dish.id in active_ids:
+            skipped_already_queued += 1
+            continue
+        new_jobs.append(MenuDishVideoJob(dish_id=dish.id, status="pending"))
+        active_ids.add(dish.id)
+        enqueued += 1
+
+    if new_jobs:
+        db.add_all(new_jobs)
+        db.commit()
+
+    return GenerateVideosResponse(
+        total_considered=len(dishes),
+        enqueued=enqueued,
+        skipped_no_media=skipped_no_media,
+        skipped_has_video=skipped_has_video,
+        skipped_already_queued=skipped_already_queued,
+    )
+
+
+@router.post("/admin/dishes/{dish_id}/generate-video", response_model=MenuDishJobPublic, status_code=status.HTTP_201_CREATED)
+def generate_video_single(
+    dish_id: int,
+    force: bool = Query(default=False),
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Поставить (или повторить) генерацию видео для одного блюда."""
+    dish = db.get(MenuDish, dish_id)
+    if not dish:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Позиция не найдена")
+    if not _dish_has_media(dish):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="У блюда нет фото и/или аудио для генерации видео",
+        )
+    if not force:
+        existing = db.scalar(
+            select(MenuDishVideoJob)
+            .where(
+                MenuDishVideoJob.dish_id == dish_id,
+                MenuDishVideoJob.status.in_(("pending", "processing")),
+            )
+            .order_by(MenuDishVideoJob.id.desc())
+        )
+        if existing:
+            return _build_dish_job_public(existing, dish)
+    job = MenuDishVideoJob(dish_id=dish_id, status="pending")
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return _build_dish_job_public(job, dish)
 

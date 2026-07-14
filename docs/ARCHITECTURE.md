@@ -50,7 +50,7 @@ JWT: access (короткий) + refresh (длинный) токен, `frontend/
 | `User`, `RegistrationRequest`, `RestaurantCatalog`, `JobTitleCatalog` | `models/user.py` | пользователи, заявки на доступ, справочники ресторанов/должностей |
 | `Course`, `CourseBlock`, `CourseSubBlock`, `CourseBlockProgress` | `models/course.py` | учебные курсы (блоки текста+картинок), привязка к ресторану/должности, прогресс прохождения по блокам |
 | `QuizTest`, `QuizQuestion`, `QuizOption`, `QuizAttempt`, `QuizAttemptAnswer` | `models/quiz.py` | тесты (single/multiple choice), попытки прохождения с детальным разбором ответов |
-| `MenuBranch`, `MenuCategory`, `MenuDish` | `models/menu.py` | меню ресторана: категории, блюда (фото/аудио/видео/ингредиенты/цена) — раздел «Вкусная тетрадь» |
+| `MenuBranch`, `MenuCategory`, `MenuDish`, `MenuDishVideoJob` | `models/menu.py` | меню ресторана: категории, блюда (фото/аудио/видео/ингредиенты/цена) — раздел «Вкусная тетрадь»; `MenuDishVideoJob` — очередь фоновой склейки видео (фото ингредиентов + озвучка → mp4) |
 | `ShiftType`, `Checklist`, `ChecklistItem`, `ChecklistCompletion`, `ChecklistItemCompletion` | `models/checklist.py` | чек-листы смен (открытие/закрытие), пункты с опциональным фото-подтверждением |
 
 `Course`, `QuizTest`, `Checklist` все опционально/обязательно привязаны к `restaurant_id` + `job_title_id` — так контент таргетируется на конкретную должность в конкретном ресторане. `Course.linked_test_id` связывает курс с финальным тестом.
@@ -62,7 +62,7 @@ JWT: access (короткий) + refresh (длинный) токен, `frontend/
 - **courses.py** — CRUD курсов (`/admin`), для learner: `/my`, `/my-overview`, прохождение блоков (`/my/{id}/study`, `/my/{id}/blocks/{id}/complete`)
 - **tests.py** — CRUD тестов, прохождение (`/my`, `/{id}/take`, `/{id}/submit`), история попыток (`/my-attempts`), аналитика (`/analytics`), импорт из Excel/Word (`/import-xlsx`, `/import-docx`, `/parse-docx`, `/import-apply`, `/import-template`)
 - **checklists.py** — типы смен, CRUD чек-листов, прохождение (`/my`, `/my/{id}/complete`), журнал прохождений (`/admin/completions`), загрузка фото (`/media`)
-- **menu.py** — публичная лента меню (`/feed`, `/categories`), admin CRUD по branches/categories/dishes, загрузка медиа
+- **menu.py** — публичная лента меню (`/feed`, `/categories`), admin CRUD по branches/categories/dishes, загрузка медиа; пачечная загрузка блюда с постановкой видео в очередь (`POST /admin/dishes/import-job`, multipart); массовый/одиночный backfill видео для уже существующих блюд (`POST /admin/dishes/generate-videos`, `POST /admin/dishes/{id}/generate-video`); статус очереди (`GET /admin/dishes/import-jobs`)
 - **dashboard.py** — `/overview` (admin-сводка), `/me-overview` (сводка для learner'а)
 - доп. в `main.py`: `GET /health`, `GET /api/v1/menu/media?path=...` (раздача файлов из `CONTENT_EXPORT_ROOT` или `backend/media_uploads`)
 
@@ -114,7 +114,9 @@ Frontend: `VITE_API_BASE_URL` (build-time для прод-докера, runtime 
 
 ## Известные особенности (важно учитывать при изменениях)
 
-- Нет Alembic — миграции схемы это код в `main.py::_run_startup`, выполняется на каждом старте backend.
+- Нет Alembic — миграции схемы это код в `main.py::_run_startup`, выполняется на каждом старте backend. Новая таблица `menu_dish_video_jobs` создаётся штатным `Base.metadata.create_all`.
+- Генерация видео блюд — фоновый воркер `app/services/video_worker.py` (демон-поток, стартует в `lifespan`): забирает `pending`-задания из `menu_dish_video_jobs` через `FOR UPDATE SKIP LOCKED` и склеивает mp4 из фото ингредиентов + озвучки через `ffmpeg` (`app/services/video.py`). Требует `ffmpeg` в образе (стоит в `backend/Dockerfile`). Настройки — `FFMPEG_BINARY`, `VIDEO_WORKER_ENABLED`, `VIDEO_WORKER_POLL_SECONDS`, `VIDEO_WORKER_TIMEOUT_SECONDS`. Для уже загруженных блюд видео ставится кнопкой «Сгенерировать видео для всех» в админке «Вкусной тетради» (`TastyNotebookView.vue` → `POST /admin/dishes/generate-videos`).
+- Заливка блюд с компа: `import-job` принимает `match_by_name=true` (обновляет существующее блюдо по имени, без дублей; поля со значением `None` не затирают существующие). Импортёр из Excel-реестра «Вкусная тетрадь» + папок `dish_photos/`, `images/`, `audio/` — `backend/scripts/import_from_registry.py` (по умолчанию dry-run, `--apply` для заливки). Более общий загрузчик по JSON-манифесту — `backend/scripts/upload_dishes_batch.py`.
 - CORS открыт на `allow_origins=["*"]` — учитывать при работе с авторизацией/cookies.
 - Медиа-файлы (фото блюд, фото подтверждения чек-листов) раздаются через `/api/v1/menu/media?path=...` с поиском по двум корням (`CONTENT_EXPORT_ROOT`, затем `backend/media_uploads`), путь нормализуется и проверяется на выход за пределы root.
 - `docker-compose.yml` зашивает внешний IP `194.87.140.241` в build-arg `VITE_API_BASE_URL` для прод-фронтенда — при смене сервера это нужно поменять.

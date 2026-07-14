@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -90,3 +92,44 @@ class MenuFeedResponse(BaseModel):
 
 class MenuMediaUploadResponse(BaseModel):
     path: str
+
+
+class MenuDishJobPublic(BaseModel):
+    id: int
+    dish_id: int
+    dish_name: str | None = None
+    status: str
+    error: str | None = None
+    attempts: int
+    video_path: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MenuDishJobsSummary(BaseModel):
+    pending: int
+    processing: int
+    done: int
+    error: int
+    total: int
+    jobs: list[MenuDishJobPublic]
+
+
+class MenuDishImportJobResponse(BaseModel):
+    dish: MenuDishAdminPublic
+    job: MenuDishJobPublic | None = None
+
+
+class GenerateVideosRequest(BaseModel):
+    force: bool = False  # пересоздавать видео даже если оно уже есть
+    restaurant_id: str | None = None
+    category_id: int | None = None
+    dish_ids: list[int] | None = None  # если задан — только эти блюда
+
+
+class GenerateVideosResponse(BaseModel):
+    total_considered: int
+    enqueued: int
+    skipped_no_media: int
+    skipped_has_video: int
+    skipped_already_queued: int

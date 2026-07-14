@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { api } from "../api/client";
 import { useBodyScrollLock } from "../composables/useBodyScrollLock";
 import { useAuthStore } from "../stores/auth";
@@ -73,6 +73,17 @@ let dragging = false;
 const adminLoading = ref(false);
 const adminError = ref("");
 const adminSuccess = ref("");
+
+interface VideoJobsSummary {
+  pending: number;
+  processing: number;
+  done: number;
+  error: number;
+  total: number;
+}
+const videoBusy = ref(false);
+const videoJobs = ref<VideoJobsSummary | null>(null);
+let videoPollTimer: number | null = null;
 const restaurants = ref<RestaurantItem[]>([]);
 const adminCategories = ref<DishCategory[]>([]);
 const adminDishes = ref<DishAdminItem[]>([]);
@@ -491,6 +502,62 @@ async function onUploadMedia(field: "photo_dish_path" | "photo_ingredients_path"
   }
 }
 
+async function refreshVideoJobs() {
+  try {
+    const { data } = await api.get<VideoJobsSummary>("/menu/admin/dishes/import-jobs", {
+      params: { limit: 1 }
+    });
+    videoJobs.value = {
+      pending: data.pending,
+      processing: data.processing,
+      done: data.done,
+      error: data.error,
+      total: data.total
+    };
+    const active = data.pending + data.processing;
+    if (active > 0) {
+      if (videoPollTimer === null) {
+        videoPollTimer = window.setInterval(refreshVideoJobs, 5000);
+      }
+    } else if (videoPollTimer !== null) {
+      window.clearInterval(videoPollTimer);
+      videoPollTimer = null;
+      await loadAdminDishes(); // подтянуть проставленные video_path
+    }
+  } catch {
+    // тихо: статус очереди не критичен
+  }
+}
+
+async function generateAllVideos() {
+  const ok = window.confirm(
+    "Поставить генерацию видео для всех блюд с фото и аудио, но без видео?"
+  );
+  if (!ok) {
+    return;
+  }
+  videoBusy.value = true;
+  adminError.value = "";
+  adminSuccess.value = "";
+  try {
+    const { data } = await api.post<{
+      total_considered: number;
+      enqueued: number;
+      skipped_no_media: number;
+      skipped_has_video: number;
+      skipped_already_queued: number;
+    }>("/menu/admin/dishes/generate-videos", {});
+    adminSuccess.value =
+      `В очередь: ${data.enqueued}. Пропущено — без медиа: ${data.skipped_no_media}, ` +
+      `уже с видео: ${data.skipped_has_video}, уже в очереди: ${data.skipped_already_queued}.`;
+    await refreshVideoJobs();
+  } catch (e: any) {
+    adminError.value = e?.response?.data?.detail ?? "Не удалось поставить генерацию видео";
+  } finally {
+    videoBusy.value = false;
+  }
+}
+
 async function saveDish() {
   adminLoading.value = true;
   adminError.value = "";
@@ -646,6 +713,14 @@ onMounted(() => {
     void loadMenuBranches();
     void loadAdminCategories();
     void loadAdminDishes();
+    void refreshVideoJobs();
+  }
+});
+
+onUnmounted(() => {
+  if (videoPollTimer !== null) {
+    window.clearInterval(videoPollTimer);
+    videoPollTimer = null;
   }
 });
 
@@ -659,6 +734,7 @@ watch(
     void loadMenuBranches();
     void loadAdminCategories();
     void loadAdminDishes();
+    void refreshVideoJobs();
   }
 );
 
@@ -789,6 +865,27 @@ useBodyScrollLock(computed(() => categoryModalOpen.value || dishModalOpen.value 
     <p class="muted">Фото и аудио обязательны по процессу. Видео можно прикрепить отдельно (если уже собрано).</p>
     <p v-if="adminError" class="error">{{ adminError }}</p>
     <p v-if="adminSuccess" class="muted">{{ adminSuccess }}</p>
+
+    <div class="card">
+      <div class="category-actions-header">
+        <h3 style="margin: 0">Видео блюд</h3>
+        <div class="category-actions-buttons">
+          <button type="button" class="ghost" @click="refreshVideoJobs">Обновить статус</button>
+          <button type="button" :disabled="videoBusy" @click="generateAllVideos">
+            {{ videoBusy ? "Ставим в очередь…" : "Сгенерировать видео для всех" }}
+          </button>
+        </div>
+      </div>
+      <p class="muted" style="margin: 8px 0 0 0">
+        Собирает видео на сервере из фото ингредиентов и озвучки для блюд, у которых видео ещё нет.
+      </p>
+      <div v-if="videoJobs && videoJobs.total > 0" class="menu-stats-row" style="margin-top: 12px">
+        <span class="status-chip">В очереди: {{ videoJobs.pending }}</span>
+        <span class="status-chip">В работе: {{ videoJobs.processing }}</span>
+        <span class="status-chip status-chip-success">Готово: {{ videoJobs.done }}</span>
+        <span v-if="videoJobs.error > 0" class="status-chip status-chip-error">Ошибки: {{ videoJobs.error }}</span>
+      </div>
+    </div>
 
     <div class="card">
       <div class="category-actions-header">

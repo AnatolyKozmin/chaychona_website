@@ -2189,6 +2189,12 @@ tr:hover td {
   color: #64748b;
 }
 
+.status-chip-error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
 .menu-accordion {
   display: grid;
   gap: 8px;
