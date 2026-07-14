@@ -106,14 +106,18 @@ def login(api_base: str, login_value: str, password: str) -> str:
     return resp.json()["access_token"]
 
 
-def resolve_restaurant(api_base: str, token: str, wanted: str) -> tuple[str | None, str]:
+def resolve_restaurant(api_base: str, token: str, wanted: str) -> tuple[str, str]:
     items = http("GET", api_base, token, "/users/catalog/restaurants").json()
     if not items:
-        return None, "(рестораны не заданы)"
+        raise SystemExit("На сервере нет ни одного ресторана. Создай ресторан в админке и укажи его в --restaurant.")
     for it in items:
         if str(it["id"]) == wanted or norm_name(it["name"]) == norm_name(wanted):
             return str(it["id"]), it["name"]
-    return str(items[0]["id"]), items[0]["name"]  # fallback: первый
+    available = ", ".join(f'"{it["name"]}"' for it in items)
+    raise SystemExit(
+        f"Ресторан {wanted!r} не найден. Доступные: {available}. "
+        f"Укажи точное имя или id в --restaurant (никакого fallback — чтобы не залить не туда)."
+    )
 
 
 def open_file(root: Path, rel: str | None):
@@ -134,7 +138,7 @@ def main() -> int:
     ap.add_argument("--token", help="готовый access-токен (вместо login/password)")
     ap.add_argument("--xlsx", default=str(PROJECT_ROOT / "ЖУ_Вкусная_тетрадь_реестр.xlsx"))
     ap.add_argument("--root", default=str(PROJECT_ROOT), help="корень для путей к медиа из Excel")
-    ap.add_argument("--restaurant", default="Чайхона №1", help="имя или id ресторана")
+    ap.add_argument("--restaurant", required=True, help="имя или id ресторана-получателя (обязательно, без него никуда не льём)")
     ap.add_argument("--apply", action="store_true", help="реально заливать (иначе dry-run)")
     ap.add_argument("--no-video", action="store_true", help="не ставить генерацию видео")
     ap.add_argument("--limit", type=int, default=0, help="обработать только первые N (0 = все)")
