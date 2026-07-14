@@ -206,8 +206,8 @@ onMounted(async () => {
             <thead>
               <tr>
                 <th>Тест</th>
-                <th>Результат</th>
-                <th>Время</th>
+                <th class="num">Результат</th>
+                <th class="num">Время, с</th>
                 <th>Дата</th>
                 <th></th>
               </tr>
@@ -216,8 +216,8 @@ onMounted(async () => {
               <template v-for="item in learnerAttempts" :key="item.id">
                 <tr>
                   <td>{{ item.test_title }}</td>
-                  <td>{{ item.correct_answers }}/{{ item.total_questions }}</td>
-                  <td>{{ item.duration_seconds ?? "-" }} сек.</td>
+                  <td class="num">{{ item.correct_answers }}/{{ item.total_questions }}</td>
+                  <td class="num">{{ item.duration_seconds ?? "—" }}</td>
                   <td>{{ formatDate(item.finished_at) }}</td>
                   <td>
                     <button type="button" class="ghost" @click="toggleAttemptDetails(item.id)">

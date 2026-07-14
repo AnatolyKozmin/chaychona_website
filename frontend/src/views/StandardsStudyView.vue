@@ -228,7 +228,7 @@ onMounted(async () => {
           v-if="activeBlock.image_path"
           :src="toMediaUrl(activeBlock.image_path) || undefined"
           alt="block image"
-          style="width: 100%; border-radius: 12px; margin-bottom: 10px"
+          class="standards-subblock-img"
         />
         <p class="long-text">{{ activeBlock.text }}</p>
         <div v-for="subblock in activeBlock.subblocks" :key="subblock.id" class="standards-subblock">

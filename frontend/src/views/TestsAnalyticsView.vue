@@ -274,14 +274,23 @@ onMounted(async () => {
     <p v-if="loading">Загрузка...</p>
 
     <template v-if="analytics && !loading">
-      <div class="card">
-        <h3>Сводка</h3>
-        <p><strong>Всего прохождений:</strong> {{ analytics.summary.total_attempts }}</p>
-        <p><strong>Уникальных пользователей:</strong> {{ analytics.summary.unique_users }}</p>
-        <p><strong>Средний результат:</strong> {{ analytics.summary.avg_score_percent.toFixed(1) }}%</p>
-        <p v-if="analytics.summary.avg_duration_seconds !== null">
-          <strong>Среднее время:</strong> {{ analytics.summary.avg_duration_seconds.toFixed(1) }} сек.
-        </p>
+      <div class="stat-row">
+        <div class="stat-cell">
+          <div class="k">Всего прохождений</div>
+          <div class="v">{{ analytics.summary.total_attempts }}</div>
+        </div>
+        <div class="stat-cell">
+          <div class="k">Уникальных пользователей</div>
+          <div class="v">{{ analytics.summary.unique_users }}</div>
+        </div>
+        <div class="stat-cell">
+          <div class="k">Средний результат</div>
+          <div class="v">{{ analytics.summary.avg_score_percent.toFixed(1) }}<span class="unit">%</span></div>
+        </div>
+        <div v-if="analytics.summary.avg_duration_seconds !== null" class="stat-cell">
+          <div class="k">Среднее время</div>
+          <div class="v">{{ analytics.summary.avg_duration_seconds.toFixed(0) }}<span class="unit"> сек</span></div>
+        </div>
       </div>
 
       <div class="card">
@@ -374,6 +383,12 @@ onMounted(async () => {
             </tbody>
           </table>
         </div>
+        <div v-if="filteredScoreboardUsers.length" class="status-legend">
+          <span><i class="g"></i> ≥ 80% — норма</span>
+          <span><i class="w"></i> 50–79% — пограничный</span>
+          <span><i class="b"></i> &lt; 50% — провал</span>
+          <span><i class="n"></i> — тест не пройден</span>
+        </div>
       </div>
 
       <div class="card">
@@ -386,8 +401,8 @@ onMounted(async () => {
                 <th>Когда</th>
                 <th>Пользователь</th>
                 <th>Тест</th>
-                <th>Результат</th>
-                <th>Время</th>
+                <th class="num">Результат</th>
+                <th class="num">Время, с</th>
                 <th></th>
               </tr>
             </thead>
@@ -396,8 +411,8 @@ onMounted(async () => {
                 <td>{{ formatDate(attempt.finished_at) }}</td>
                 <td>{{ attempt.user_name }}</td>
                 <td>{{ attempt.test_title }}</td>
-                <td>{{ attempt.correct_answers }}/{{ attempt.total_questions }}</td>
-                <td>{{ attempt.duration_seconds ?? "-" }}</td>
+                <td class="num">{{ attempt.correct_answers }}/{{ attempt.total_questions }}</td>
+                <td class="num">{{ attempt.duration_seconds ?? "—" }}</td>
                 <td>
                   <button type="button" class="ghost" @click="openAttemptDetail(attempt.id)">Открыть</button>
                 </td>
@@ -415,18 +430,18 @@ onMounted(async () => {
               <tr>
                 <th>Тест</th>
                 <th>Вопрос</th>
-                <th>Попыток</th>
-                <th>Ошибок</th>
-                <th>Доля ошибок</th>
+                <th class="num">Попыток</th>
+                <th class="num">Ошибок</th>
+                <th class="num">Доля ошибок</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="question in analytics.question_analytics.slice(0, 50)" :key="question.question_id">
                 <td>{{ question.test_title }}</td>
                 <td>{{ question.question_text }}</td>
-                <td>{{ question.total_attempts }}</td>
-                <td>{{ question.wrong_attempts }}</td>
-                <td>{{ formatPercent(question.wrong_rate) }}</td>
+                <td class="num">{{ question.total_attempts }}</td>
+                <td class="num">{{ question.wrong_attempts }}</td>
+                <td class="num">{{ formatPercent(question.wrong_rate) }}</td>
               </tr>
             </tbody>
           </table>
@@ -440,24 +455,24 @@ onMounted(async () => {
             <thead>
               <tr>
                 <th>Пользователь</th>
-                <th>Попыток</th>
-                <th>Ответов</th>
-                <th>Ошибок</th>
-                <th>Доля ошибок</th>
-                <th>Среднее время</th>
+                <th class="num">Попыток</th>
+                <th class="num">Ответов</th>
+                <th class="num">Ошибок</th>
+                <th class="num">Доля ошибок</th>
+                <th class="num">Ср. время, с</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="user in analytics.user_analytics" :key="user.user_id">
-                <td>
-                  <div>{{ user.user_name }}</div>
+                <td class="who">
+                  <div class="nm">{{ user.user_name }}</div>
                   <div class="muted" style="font-size: 12px">{{ user.user_email }}</div>
                 </td>
-                <td>{{ user.attempts_count }}</td>
-                <td>{{ user.total_answers }}</td>
-                <td>{{ user.wrong_answers }}</td>
-                <td>{{ formatPercent(user.wrong_rate) }}</td>
-                <td>{{ user.avg_duration_seconds?.toFixed(1) ?? "-" }}</td>
+                <td class="num">{{ user.attempts_count }}</td>
+                <td class="num">{{ user.total_answers }}</td>
+                <td class="num">{{ user.wrong_answers }}</td>
+                <td class="num">{{ formatPercent(user.wrong_rate) }}</td>
+                <td class="num">{{ user.avg_duration_seconds?.toFixed(0) ?? "—" }}</td>
               </tr>
             </tbody>
           </table>
@@ -490,12 +505,12 @@ onMounted(async () => {
           <table>
             <thead>
               <tr>
-                <th>ID</th>
+                <th class="num">ID</th>
                 <th>Пользователь</th>
                 <th>Ресторан / роль</th>
                 <th>Тест</th>
-                <th>Результат</th>
-                <th>Время</th>
+                <th class="num">Результат</th>
+                <th class="num">Время, с</th>
                 <th>Начало</th>
                 <th>Окончание</th>
                 <th></th>
@@ -503,15 +518,15 @@ onMounted(async () => {
             </thead>
             <tbody>
               <tr v-for="attempt in filteredAttempts" :key="attempt.id">
-                <td>{{ attempt.id }}</td>
-                <td>
-                  <div>{{ attempt.user_name }}</div>
+                <td class="num">{{ attempt.id }}</td>
+                <td class="who">
+                  <div class="nm">{{ attempt.user_name }}</div>
                   <div class="muted" style="font-size: 12px">{{ attempt.user_email }}</div>
                 </td>
-                <td>{{ attempt.user_restaurant || "-" }} / {{ attempt.user_job_title || "-" }}</td>
+                <td>{{ attempt.user_restaurant || "—" }} / {{ attempt.user_job_title || "—" }}</td>
                 <td>{{ attempt.test_title }}</td>
-                <td>{{ attempt.correct_answers }}/{{ attempt.total_questions }}</td>
-                <td>{{ attempt.duration_seconds ?? "-" }}</td>
+                <td class="num">{{ attempt.correct_answers }}/{{ attempt.total_questions }}</td>
+                <td class="num">{{ attempt.duration_seconds ?? "—" }}</td>
                 <td>{{ formatDate(attempt.started_at) }}</td>
                 <td>{{ formatDate(attempt.finished_at) }}</td>
                 <td>

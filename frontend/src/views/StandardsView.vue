@@ -443,7 +443,7 @@ watch(
           <label>Заголовок блока</label>
           <input v-model="block.heading" />
           <label>Текст блока</label>
-          <textarea v-model="block.text" rows="5" required style="width: 100%; border: 1px solid #d0d8e5; border-radius: 10px; padding: 10px 12px;" />
+          <textarea v-model="block.text" rows="5" required />
           <label>Картинка блока (опционально)</label>
           <div class="actions-row">
             <input v-model="block.image_path" placeholder="uploads/..." />
@@ -471,7 +471,6 @@ watch(
                 v-model="subblock.text"
                 rows="4"
                 required
-                style="width: 100%; border: 1px solid #d0d8e5; border-radius: 10px; padding: 10px 12px;"
               />
               <label>Картинка подблока (опционально)</label>
               <div class="actions-row">
@@ -495,7 +494,7 @@ watch(
           <tr>
             <th>Название</th>
             <th>Для кого</th>
-            <th>Блоков</th>
+            <th class="num">Блоков</th>
             <th>Тест</th>
             <th>Действия</th>
           </tr>
@@ -504,8 +503,8 @@ watch(
           <tr v-for="course in courses" :key="course.id">
             <td>{{ course.title }}</td>
             <td>{{ course.restaurant_name || "Все" }} / {{ course.job_title_name || "Все" }}</td>
-            <td>{{ course.blocks.length }}</td>
-            <td>{{ course.linked_test?.title || "-" }}</td>
+            <td class="num">{{ course.blocks.length }}</td>
+            <td>{{ course.linked_test?.title || "—" }}</td>
             <td>
               <div class="actions-row">
                 <button type="button" class="ghost" @click="editCourse(course)">Редактировать</button>

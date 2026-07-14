@@ -120,6 +120,22 @@ function scorePercent(item: { total_questions: number; correct_answers: number }
   return Math.round((item.correct_answers / item.total_questions) * 100);
 }
 
+/** Единая шкала порогов: ≥80 норма, 50–79 пограничный, <50 провал. */
+function scoreClass(percent: number): "good" | "warn" | "bad" {
+  if (percent >= 80) return "good";
+  if (percent >= 50) return "warn";
+  return "bad";
+}
+
+const roleLabels: Record<UserRole, string> = {
+  superadmin: "Суперадмин",
+  admin: "Админ",
+  learner: "Обучающийся"
+};
+function roleLabel(role: UserRole): string {
+  return roleLabels[role] ?? role;
+}
+
 onMounted(() => {
   loadUsers();
 });
@@ -176,10 +192,10 @@ onMounted(() => {
             <strong>{{ user.full_name }}</strong>
             <p class="muted" style="margin: 4px 0 0 0; font-size: 13px">{{ user.email }}</p>
             <p v-if="user.restaurant || user.job_title" class="muted" style="margin: 4px 0 0 0; font-size: 12px">
-              {{ user.restaurant || "-" }} · {{ user.job_title || "-" }}
+              {{ user.restaurant || "—" }} · {{ user.job_title || "—" }}
             </p>
           </div>
-          <span class="people-card-role">{{ user.role }}</span>
+          <span class="people-card-role">{{ roleLabel(user.role) }}</span>
           <span class="people-card-arrow">→</span>
         </div>
       </div>
@@ -202,46 +218,46 @@ onMounted(() => {
         <template v-else-if="activity">
           <h4 style="margin: 16px 0 10px 0">Тесты</h4>
           <p v-if="activity.attempts.length === 0" class="muted">Попыток пока нет.</p>
-          <div v-else class="attempt-result-list">
+          <div v-else class="people-list">
             <div
               v-for="a in activity.attempts"
               :key="a.id"
-              class="test-result-card"
-              :class="scorePercent(a) >= 70 ? 'test-result-card--correct' : 'test-result-card--incorrect'"
+              class="people-card"
+              style="cursor: default"
             >
-              <div class="actions-row" style="flex-wrap: wrap; gap: 8px">
-                <div>
-                  <strong>{{ a.test_title }}</strong>
-                  <p class="muted" style="margin: 4px 0 0 0">
-                    {{ formatDate(a.finished_at) }} · {{ a.correct_answers }}/{{ a.total_questions }} ({{ a.score_percent }}%)
-                  </p>
-                </div>
-                <RouterLink
-                  :to="{ name: 'tests-analytics', query: { user: selectedUser?.full_name } }"
-                  class="ghost"
-                  @click="closeUserDetail"
-                >
-                  Подробнее
-                </RouterLink>
+              <div class="people-card-main">
+                <strong>{{ a.test_title }}</strong>
+                <p class="muted" style="margin: 4px 0 0 0">
+                  {{ formatDate(a.finished_at) }} · {{ a.correct_answers }}/{{ a.total_questions }}
+                </p>
               </div>
+              <span class="badge" :class="scoreClass(a.score_percent)">{{ a.score_percent }}%</span>
+              <RouterLink
+                :to="{ name: 'tests-analytics', query: { user: selectedUser?.full_name } }"
+                class="ghost"
+                @click="closeUserDetail"
+              >
+                Подробнее
+              </RouterLink>
             </div>
           </div>
 
           <h4 style="margin: 20px 0 10px 0">Чек-листы</h4>
           <p v-if="activity.checklist_completions.length === 0" class="muted">Прохождений пока нет.</p>
-          <div v-else class="attempt-result-list">
+          <div v-else class="people-list">
             <div
               v-for="c in activity.checklist_completions"
               :key="c.id"
-              class="test-result-card test-result-card--correct"
+              class="people-card"
+              style="cursor: default"
             >
-              <div class="actions-row">
-                <div>
-                  <strong>{{ c.checklist_title }}</strong>
-                  <p class="muted" style="margin: 4px 0 0 0">
-                    {{ formatDate(c.completed_at) }} · {{ c.items_count }} пунктов
-                  </p>
-                </div>
+              <div class="people-card-main">
+                <strong>{{ c.checklist_title }}</strong>
+                <p class="muted" style="margin: 4px 0 0 0">
+                  {{ formatDate(c.completed_at) }} · {{ c.items_count }} пунктов
+                </p>
+              </div>
+              <span class="badge good">выполнен</span>
                 <RouterLink
                   :to="{ name: 'checklists', query: { tab: 'reports', user_id: selectedUser?.id } }"
                   class="ghost"
@@ -249,7 +265,6 @@ onMounted(() => {
                 >
                   В отчёты
                 </RouterLink>
-              </div>
             </div>
           </div>
         </template>

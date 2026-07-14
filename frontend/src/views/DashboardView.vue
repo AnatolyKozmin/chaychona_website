@@ -147,13 +147,13 @@ watch(
             <thead>
               <tr>
                 <th>Тип</th>
-                <th>Кол-во</th>
+                <th class="num">Кол-во</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="item in overview.products_by_bucket" :key="item.bucket">
                 <td>{{ item.bucket }}</td>
-                <td>{{ item.items_count }}</td>
+                <td class="num">{{ item.items_count }}</td>
               </tr>
             </tbody>
           </table>
@@ -167,15 +167,15 @@ watch(
             <thead>
               <tr>
                 <th>Ресторан</th>
-                <th>Тестов</th>
-                <th>Обучающихся</th>
+                <th class="num">Тестов</th>
+                <th class="num">Обучающихся</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="restaurant in overview.restaurants" :key="restaurant.restaurant_id">
                 <td>{{ restaurant.restaurant_name }}</td>
-                <td>{{ restaurant.tests_count }}</td>
-                <td>{{ restaurant.learners_count }}</td>
+                <td class="num">{{ restaurant.tests_count }}</td>
+                <td class="num">{{ restaurant.learners_count }}</td>
               </tr>
             </tbody>
           </table>
@@ -189,21 +189,21 @@ watch(
             <thead>
               <tr>
                 <th>Пользователь</th>
-                <th>Попыток</th>
-                <th>Средний результат</th>
-                <th>Лучший результат</th>
+                <th class="num">Попыток</th>
+                <th class="num">Средний</th>
+                <th class="num">Лучший</th>
                 <th>Последняя попытка</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="item in overview.top_results" :key="item.user_id">
-                <td>
-                  <div>{{ item.user_name }}</div>
+                <td class="who">
+                  <div class="nm">{{ item.user_name }}</div>
                   <div class="muted" style="font-size: 12px">{{ item.user_email }}</div>
                 </td>
-                <td>{{ item.attempts_count }}</td>
-                <td>{{ item.avg_score_percent.toFixed(1) }}%</td>
-                <td>{{ item.best_score_percent.toFixed(1) }}%</td>
+                <td class="num">{{ item.attempts_count }}</td>
+                <td class="num">{{ item.avg_score_percent.toFixed(1) }}%</td>
+                <td class="num">{{ item.best_score_percent.toFixed(1) }}%</td>
                 <td>{{ formatDate(item.last_attempt_at) }}</td>
               </tr>
             </tbody>
