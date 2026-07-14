@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/auth";
@@ -193,10 +193,86 @@ async function loadTests() {
   try {
     const { data } = await api.get<TestPublic[]>("/tests");
     tests.value = data;
+    testsPage.value = 1;
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "Не удалось загрузить тесты";
   } finally {
     loading.value = false;
+  }
+}
+
+// Поиск + постраничный список тестов
+const testSearch = ref("");
+const testsPage = ref(1);
+const TESTS_PAGE_SIZE = 10;
+
+const filteredTests = computed(() => {
+  const query = testSearch.value.trim().toLowerCase();
+  if (!query) {
+    return tests.value;
+  }
+  return tests.value.filter((test) => {
+    const haystack = [
+      test.title,
+      test.external_code ?? "",
+      ...test.assignments.map((a) => `${a.restaurant_name} ${a.job_title_name}`)
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(query);
+  });
+});
+
+const testsTotalPages = computed(() =>
+  Math.max(1, Math.ceil(filteredTests.value.length / TESTS_PAGE_SIZE))
+);
+const pagedTests = computed(() => {
+  const start = (testsPage.value - 1) * TESTS_PAGE_SIZE;
+  return filteredTests.value.slice(start, start + TESTS_PAGE_SIZE);
+});
+const testsRangeFrom = computed(() =>
+  filteredTests.value.length === 0 ? 0 : (testsPage.value - 1) * TESTS_PAGE_SIZE + 1
+);
+const testsRangeTo = computed(() =>
+  Math.min(testsPage.value * TESTS_PAGE_SIZE, filteredTests.value.length)
+);
+const testPageTabs = computed<Array<number | "gap">>(() => {
+  const total = testsTotalPages.value;
+  const current = testsPage.value;
+  const tabs: Array<number | "gap"> = [];
+  for (let p = 1; p <= total; p++) {
+    if (p === 1 || p === total || (p >= current - 2 && p <= current + 2)) {
+      tabs.push(p);
+    } else if (tabs[tabs.length - 1] !== "gap") {
+      tabs.push("gap");
+    }
+  }
+  return tabs;
+});
+function goTestsPage(page: number) {
+  testsPage.value = Math.min(Math.max(1, page), testsTotalPages.value);
+}
+// Поиск сбрасывает на первую страницу
+watch(testSearch, () => {
+  testsPage.value = 1;
+});
+
+async function deleteTest(test: TestPublic) {
+  const confirmed = window.confirm(`Удалить тест «${test.title}»? Действие необратимо.`);
+  if (!confirmed) {
+    return;
+  }
+  saving.value = true;
+  error.value = "";
+  success.value = "";
+  try {
+    await api.delete(`/tests/${test.id}`);
+    success.value = `Тест «${test.title}» удалён`;
+    await loadTests();
+  } catch (e: any) {
+    error.value = e?.response?.data?.detail ?? "Не удалось удалить тест";
+  } finally {
+    saving.value = false;
   }
 }
 
@@ -892,31 +968,72 @@ onMounted(async () => {
         <h3>Созданные тесты</h3>
         <button type="button" class="ghost" @click="loadTests">Обновить</button>
       </div>
+      <div class="test-search-row">
+        <input
+          v-model="testSearch"
+          class="test-search-input"
+          type="search"
+          placeholder="Поиск: название, код, ресторан или роль"
+        />
+        <span v-if="tests.length" class="pager-info">
+          {{ testsRangeFrom }}–{{ testsRangeTo }} из {{ filteredTests.length }}
+        </span>
+      </div>
+
       <p v-if="loading">Загрузка...</p>
       <p v-else-if="tests.length === 0" class="muted">Тестов пока нет. Создайте первый тест выше.</p>
-      <div v-else class="test-list">
-        <button
-          v-for="test in tests"
-          :key="test.id"
-          type="button"
-          class="test-list-item"
-          @click="openTestModal(test)"
-        >
-          <div class="test-list-item-title">{{ test.title }}</div>
-          <div class="test-list-item-meta">
-            <span v-if="test.assignments.length === 0" class="muted">Без привязки</span>
-            <template v-else>
-              {{ test.assignments.length }} {{ test.assignments.length === 1 ? "назначение" : "назначений" }}
-            </template>
-            <span v-if="test.external_code" class="test-list-item-code">{{ test.external_code }}</span>
+      <p v-else-if="filteredTests.length === 0" class="muted">Ничего не найдено по запросу «{{ testSearch }}».</p>
+      <template v-else>
+        <div v-if="testsTotalPages > 1" class="pager" style="margin-bottom: 12px">
+          <button type="button" class="pager-btn" :disabled="testsPage === 1" @click="goTestsPage(testsPage - 1)">‹</button>
+          <template v-for="(tab, i) in testPageTabs" :key="i">
+            <span v-if="tab === 'gap'" class="pager-ellipsis">…</span>
+            <button
+              v-else
+              type="button"
+              class="pager-btn"
+              :class="{ 'pager-btn--active': tab === testsPage }"
+              @click="goTestsPage(tab)"
+            >
+              {{ tab }}
+            </button>
+          </template>
+          <button type="button" class="pager-btn" :disabled="testsPage === testsTotalPages" @click="goTestsPage(testsPage + 1)">›</button>
+        </div>
+
+        <div class="test-list">
+          <div v-for="test in pagedTests" :key="test.id" class="test-list-row">
+            <button
+              type="button"
+              class="test-list-item"
+              @click="openTestModal(test)"
+            >
+              <div class="test-list-item-title">{{ test.title }}</div>
+              <div class="test-list-item-meta">
+                <span v-if="test.assignments.length === 0" class="muted">Без привязки</span>
+                <template v-else>
+                  {{ test.assignments.length }} {{ test.assignments.length === 1 ? "назначение" : "назначений" }}
+                </template>
+                <span v-if="test.external_code" class="test-list-item-code">{{ test.external_code }}</span>
+              </div>
+              <div v-if="test.assignments.length > 0" class="test-list-item-assignments">
+                <span v-for="a in test.assignments" :key="a.restaurant_id + a.job_title_id" class="role-chip">
+                  {{ a.restaurant_name }} · {{ a.job_title_name }}
+                </span>
+              </div>
+            </button>
+            <button
+              type="button"
+              class="test-del-btn"
+              title="Удалить тест"
+              :disabled="saving"
+              @click="deleteTest(test)"
+            >
+              Удалить
+            </button>
           </div>
-          <div v-if="test.assignments.length > 0" class="test-list-item-assignments">
-            <span v-for="a in test.assignments" :key="a.restaurant_id + a.job_title_id" class="role-chip">
-              {{ a.restaurant_name }} · {{ a.job_title_name }}
-            </span>
-          </div>
-        </button>
-      </div>
+        </div>
+      </template>
     </div>
   </section>
 
@@ -1204,3 +1321,94 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.test-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 14px;
+}
+.test-search-input {
+  flex: 1;
+  min-width: 220px;
+  margin: 0;
+}
+
+/* Строка списка: карточка теста + кнопка удаления в углу */
+.test-list-row {
+  position: relative;
+}
+.test-list-row .test-list-item {
+  padding-right: 104px;
+}
+.test-del-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  width: auto;
+  margin: 0;
+  padding: 6px 12px;
+  border: 1px solid #f0c4c0;
+  border-radius: 8px;
+  background: #fff;
+  color: #b42318;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.test-del-btn:hover:not(:disabled) {
+  background: #fdecec;
+  border-color: #e29b95;
+}
+.test-del-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Постраничные язычки */
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.pager-btn {
+  width: auto;
+  margin: 0;
+  min-width: 36px;
+  padding: 6px 11px;
+  border: 1px solid #d0d8e5;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pager-btn:hover:not(:disabled) {
+  background: #f5f8ff;
+  border-color: #c5d4f0;
+  color: #1d4ed8;
+}
+.pager-btn--active,
+.pager-btn--active:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.pager-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.pager-ellipsis {
+  color: #94a3b8;
+  padding: 0 2px;
+}
+.pager-info {
+  font-size: 13px;
+  color: #64748b;
+}
+</style>
