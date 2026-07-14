@@ -151,10 +151,16 @@ def main() -> int:
     restaurant_id, restaurant_name = resolve_restaurant(args.api_base, token, args.restaurant)
     print(f"Ресторан: {restaurant_name} ({restaurant_id})")
 
-    # существующие категории и блюда
-    server_categories = http("GET", args.api_base, token, "/menu/admin/categories").json()
+    # существующие категории и блюда — ТОЛЬКО целевого ресторана, чтобы не
+    # цеплять одноимённую категорию/блюдо другого ресторана.
+    rid = str(restaurant_id) if restaurant_id else ""
+
+    def _same_restaurant(obj) -> bool:
+        return str(obj.get("restaurant_id") or "") == rid
+
+    server_categories = [c for c in http("GET", args.api_base, token, "/menu/admin/categories").json() if _same_restaurant(c)]
     cat_by_name = {norm_name(c["name"]): c["id"] for c in server_categories}
-    server_dishes = http("GET", args.api_base, token, "/menu/admin/dishes").json()
+    server_dishes = [d for d in http("GET", args.api_base, token, "/menu/admin/dishes").json() if _same_restaurant(d)]
     existing_names = {norm_name(d["name"]) for d in server_dishes}
 
     wanted_cats = sorted({d["category"] for d in dishes if d["category"]})
