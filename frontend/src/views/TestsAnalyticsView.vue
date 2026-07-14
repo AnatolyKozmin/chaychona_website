@@ -122,6 +122,10 @@ const activeTab = ref<AnalyticsTab>("overview");
 const scoreView = ref<"byTest" | "matrix">("byTest");
 const selectedTestId = ref<number | null>(null);
 
+// Постраничная навигация по «Проблемным вопросам» (окно + язычки)
+const questionsPage = ref(1);
+const QUESTIONS_PAGE_SIZE = 12;
+
 function formatDate(value: string | null): string {
   if (!value) {
     return "-";
@@ -202,6 +206,40 @@ function scoreCellClass(cell: ScoreboardCell): string {
   return "score-cell--bad";
 }
 
+const questionRows = computed(() => analytics.value?.question_analytics ?? []);
+const questionsTotalPages = computed(() =>
+  Math.max(1, Math.ceil(questionRows.value.length / QUESTIONS_PAGE_SIZE))
+);
+const pagedQuestions = computed(() => {
+  const start = (questionsPage.value - 1) * QUESTIONS_PAGE_SIZE;
+  return questionRows.value.slice(start, start + QUESTIONS_PAGE_SIZE);
+});
+const questionsRangeFrom = computed(() =>
+  questionRows.value.length === 0 ? 0 : (questionsPage.value - 1) * QUESTIONS_PAGE_SIZE + 1
+);
+const questionsRangeTo = computed(() =>
+  Math.min(questionsPage.value * QUESTIONS_PAGE_SIZE, questionRows.value.length)
+);
+
+/** Язычки страниц с многоточиями: 1 … 4 5 [6] 7 8 … 20 */
+const questionPageTabs = computed<Array<number | "gap">>(() => {
+  const total = questionsTotalPages.value;
+  const current = questionsPage.value;
+  const tabs: Array<number | "gap"> = [];
+  for (let p = 1; p <= total; p++) {
+    if (p === 1 || p === total || (p >= current - 2 && p <= current + 2)) {
+      tabs.push(p);
+    } else if (tabs[tabs.length - 1] !== "gap") {
+      tabs.push("gap");
+    }
+  }
+  return tabs;
+});
+
+function goQuestionsPage(page: number) {
+  questionsPage.value = Math.min(Math.max(1, page), questionsTotalPages.value);
+}
+
 /** Все тесты для селектора вкладки «Баллы → По тесту». */
 const allScoreboardTests = computed(() => scoreboard.value?.tests ?? []);
 
@@ -255,6 +293,7 @@ async function loadAnalytics() {
     ]);
     analytics.value = analyticsResp.data;
     scoreboard.value = scoreboardResp.data;
+    questionsPage.value = 1;
     if (selectedTestId.value == null || !scoreboardResp.data.tests.some((t) => t.id === selectedTestId.value)) {
       selectedTestId.value = scoreboardResp.data.tests[0]?.id ?? null;
     }
@@ -525,29 +564,73 @@ onMounted(async () => {
       </div>
 
       <div v-if="activeTab === 'questions'" class="card">
-        <h3>Проблемные вопросы</h3>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Тест</th>
-                <th>Вопрос</th>
-                <th>Попыток</th>
-                <th>Ошибок</th>
-                <th>Доля ошибок</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="question in analytics.question_analytics.slice(0, 50)" :key="question.question_id">
-                <td>{{ question.test_title }}</td>
-                <td>{{ question.question_text }}</td>
-                <td>{{ question.total_attempts }}</td>
-                <td>{{ question.wrong_attempts }}</td>
-                <td>{{ formatPercent(question.wrong_rate) }}</td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="actions-row" style="flex-wrap: wrap; gap: 10px">
+          <h3 style="margin: 0">Проблемные вопросы</h3>
+          <span class="pager-info" v-if="questionRows.length">
+            {{ questionsRangeFrom }}–{{ questionsRangeTo }} из {{ questionRows.length }}
+          </span>
         </div>
+
+        <p v-if="questionRows.length === 0" class="muted">Пока нет данных по вопросам.</p>
+
+        <template v-else>
+          <!-- Язычки страниц сверху — листать не прокручивая -->
+          <div v-if="questionsTotalPages > 1" class="pager" style="margin-top: 8px">
+            <button
+              type="button"
+              class="pager-btn"
+              :disabled="questionsPage === 1"
+              @click="goQuestionsPage(questionsPage - 1)"
+            >
+              ‹
+            </button>
+            <template v-for="(tab, i) in questionPageTabs" :key="i">
+              <span v-if="tab === 'gap'" class="pager-ellipsis">…</span>
+              <button
+                v-else
+                type="button"
+                class="pager-btn"
+                :class="{ 'pager-btn--active': tab === questionsPage }"
+                @click="goQuestionsPage(tab)"
+              >
+                {{ tab }}
+              </button>
+            </template>
+            <button
+              type="button"
+              class="pager-btn"
+              :disabled="questionsPage === questionsTotalPages"
+              @click="goQuestionsPage(questionsPage + 1)"
+            >
+              ›
+            </button>
+          </div>
+
+          <div class="table-wrap" style="margin-top: 12px">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 44px">#</th>
+                  <th>Тест</th>
+                  <th>Вопрос</th>
+                  <th>Попыток</th>
+                  <th>Ошибок</th>
+                  <th>Доля ошибок</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(question, idx) in pagedQuestions" :key="question.question_id">
+                  <td class="muted">{{ questionsRangeFrom + idx }}</td>
+                  <td>{{ question.test_title }}</td>
+                  <td>{{ question.question_text }}</td>
+                  <td>{{ question.total_attempts }}</td>
+                  <td>{{ question.wrong_attempts }}</td>
+                  <td>{{ formatPercent(question.wrong_rate) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
       </div>
 
       <div v-if="activeTab === 'users'" class="card">
@@ -705,3 +788,48 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.pager-btn {
+  width: auto;
+  margin: 0;
+  min-width: 36px;
+  padding: 6px 11px;
+  border: 1px solid #d0d8e5;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pager-btn:hover:not(:disabled) {
+  background: #f5f8ff;
+  border-color: #c5d4f0;
+  color: #1d4ed8;
+}
+.pager-btn--active,
+.pager-btn--active:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.pager-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.pager-ellipsis {
+  color: #94a3b8;
+  padding: 0 2px;
+}
+.pager-info {
+  font-size: 13px;
+  color: #64748b;
+}
+</style>
