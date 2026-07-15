@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
@@ -270,28 +270,20 @@ def delete_test(
     if not test:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Тест не найден")
 
-    attempts = list(db.scalars(select(QuizAttempt).where(QuizAttempt.test_id == test.id)).all())
-    for attempt in attempts:
-        attempt_answers = list(db.scalars(select(QuizAttemptAnswer).where(QuizAttemptAnswer.attempt_id == attempt.id)).all())
-        for attempt_answer in attempt_answers:
-            db.delete(attempt_answer)
-        db.delete(attempt)
+    # Между моделями нет relationship(), поэтому порядок ORM-delete при flush
+    # не гарантирован — удаляем явными bulk-DELETE строго от детей к родителям.
+    attempt_ids = select(QuizAttempt.id).where(QuizAttempt.test_id == test.id)
+    db.execute(delete(QuizAttemptAnswer).where(QuizAttemptAnswer.attempt_id.in_(attempt_ids)))
+    db.execute(delete(QuizAttempt).where(QuizAttempt.test_id == test.id))
 
-    questions = list(db.scalars(select(QuizQuestion).where(QuizQuestion.test_id == test.id)).all())
-    for question in questions:
-        options = list(db.scalars(select(QuizOption).where(QuizOption.question_id == question.id)).all())
-        for option in options:
-            db.delete(option)
-        db.delete(question)
+    question_ids = select(QuizQuestion.id).where(QuizQuestion.test_id == test.id)
+    db.execute(delete(QuizOption).where(QuizOption.question_id.in_(question_ids)))
+    db.execute(delete(QuizQuestion).where(QuizQuestion.test_id == test.id))
 
-    assignments = list(db.scalars(select(QuizTestAssignment).where(QuizTestAssignment.test_id == test.id)).all())
-    for assignment in assignments:
-        db.delete(assignment)
+    db.execute(delete(QuizTestAssignment).where(QuizTestAssignment.test_id == test.id))
 
     # Отвязываем тест от курсов «Стандартов», иначе внешний ключ не даст удалить.
-    linked_courses = list(db.scalars(select(Course).where(Course.linked_test_id == test.id)).all())
-    for course in linked_courses:
-        course.linked_test_id = None
+    db.execute(update(Course).where(Course.linked_test_id == test.id).values(linked_test_id=None))
 
     db.delete(test)
     db.commit()
