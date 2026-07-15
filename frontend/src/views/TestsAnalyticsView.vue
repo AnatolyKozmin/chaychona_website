@@ -100,6 +100,24 @@ interface ScoreboardResponse {
   users: ScoreboardUser[];
 }
 
+interface DirectoryUser {
+  id: string;
+  email: string;
+  full_name: string;
+  restaurant: string | null;
+  role: string;
+  job_title: string | null;
+  is_active: boolean;
+}
+
+interface EmployeeScoreRow {
+  key: string;
+  name: string;
+  email: string;
+  jobTitle: string;
+  scores: Array<{ testId: number; testTitle: string; cell: ScoreboardCell }>;
+}
+
 const route = useRoute();
 const auth = useAuthStore();
 const loading = ref(false);
@@ -117,8 +135,12 @@ const filterRestaurant = ref("");
 const filterRole = ref("");
 const filterUser = ref("");
 
-type AnalyticsTab = "overview" | "scores" | "attempts" | "questions" | "users";
+type AnalyticsTab = "overview" | "restaurant" | "scores" | "attempts" | "questions" | "users";
 const activeTab = ref<AnalyticsTab>("overview");
+
+const directory = ref<DirectoryUser[]>([]);
+const selectedRestaurant = ref("");
+const restaurantSearch = ref("");
 const scoreView = ref<"byTest" | "matrix">("byTest");
 const selectedTestId = ref<number | null>(null);
 
@@ -206,6 +228,106 @@ function scoreCellClass(cell: ScoreboardCell): string {
   return "score-cell--bad";
 }
 
+/** Строки «сотрудник + его баллы по тестам» для одного ресторана.
+ *  База — активные learner'ы из справочника (видно и тех, кто ничего не сдавал),
+ *  плюс люди из scoreboard с этим рестораном, которых в справочнике уже нет. */
+function buildRestaurantRows(restaurant: string): EmployeeScoreRow[] {
+  if (!restaurant) {
+    return [];
+  }
+  const testTitleById = new Map((scoreboard.value?.tests ?? []).map((t) => [t.id, t.title]));
+  const scoresByUserId = new Map((scoreboard.value?.users ?? []).map((u) => [u.user_id, u]));
+
+  function makeRow(id: string, name: string, email: string, jobTitle: string): EmployeeScoreRow {
+    const scores = (scoresByUserId.get(id)?.scores ?? [])
+      .map((cell) => ({
+        testId: cell.test_id,
+        testTitle: testTitleById.get(cell.test_id) ?? "",
+        cell
+      }))
+      .filter((s) => s.testTitle)
+      .sort((a, b) => a.testTitle.localeCompare(b.testTitle, "ru"));
+    return { key: id, name, email, jobTitle, scores };
+  }
+
+  const rows: EmployeeScoreRow[] = [];
+  const seen = new Set<string>();
+  for (const u of directory.value) {
+    if (u.role !== "learner" || !u.is_active || (u.restaurant || "") !== restaurant) {
+      continue;
+    }
+    seen.add(u.id);
+    rows.push(makeRow(u.id, u.full_name, u.email, u.job_title || ""));
+  }
+  for (const sbUser of scoreboard.value?.users ?? []) {
+    if ((sbUser.user_restaurant || "") !== restaurant || seen.has(sbUser.user_id)) {
+      continue;
+    }
+    rows.push(makeRow(sbUser.user_id, sbUser.user_name, sbUser.user_email, sbUser.user_job_title || ""));
+  }
+  return rows;
+}
+
+/** Язычки ресторанов: справочник сотрудников + рестораны из scoreboard. */
+const restaurantOptions = computed(() => {
+  const names = new Set<string>();
+  for (const u of directory.value) {
+    if (u.role === "learner" && u.is_active && u.restaurant) {
+      names.add(u.restaurant);
+    }
+  }
+  for (const u of scoreboard.value?.users ?? []) {
+    if (u.user_restaurant) {
+      names.add(u.user_restaurant);
+    }
+  }
+  return [...names]
+    .sort((a, b) => a.localeCompare(b, "ru"))
+    .map((name) => ({ name, employees: buildRestaurantRows(name).length }));
+});
+
+const restaurantRows = computed(() => buildRestaurantRows(selectedRestaurant.value));
+
+/** Поиск + порядок: сначала сдававшие (по алфавиту), затем не сдававшие. */
+const visibleRestaurantRows = computed(() => {
+  const q = restaurantSearch.value.trim().toLowerCase();
+  return restaurantRows.value
+    .filter((r) => !q || `${r.name} ${r.email}`.toLowerCase().includes(q))
+    .sort((a, b) => {
+      const aEmpty = a.scores.length === 0 ? 1 : 0;
+      const bEmpty = b.scores.length === 0 ? 1 : 0;
+      return aEmpty - bEmpty || a.name.localeCompare(b.name, "ru");
+    });
+});
+
+function rowAvgPercent(row: EmployeeScoreRow): number | null {
+  if (row.scores.length === 0) {
+    return null;
+  }
+  return row.scores.reduce((sum, s) => sum + cellPercent(s.cell), 0) / row.scores.length;
+}
+
+function avgBadgeClass(percent: number): string {
+  if (percent >= 80) {
+    return "score-cell--good";
+  }
+  if (percent >= 50) {
+    return "score-cell--mid";
+  }
+  return "score-cell--bad";
+}
+
+const restaurantSummary = computed(() => {
+  const rows = restaurantRows.value;
+  const tested = rows.filter((r) => r.scores.length > 0);
+  const percents = tested.flatMap((r) => r.scores.map((s) => cellPercent(s.cell)));
+  return {
+    employees: rows.length,
+    tested: tested.length,
+    avgPercent: percents.length ? percents.reduce((a, b) => a + b, 0) / percents.length : null
+  };
+});
+
 const questionRows = computed(() => analytics.value?.question_analytics ?? []);
 const questionsTotalPages = computed(() =>
   Math.max(1, Math.ceil(questionRows.value.length / QUESTIONS_PAGE_SIZE))
@@ -282,18 +404,23 @@ async function loadAnalytics() {
   loading.value = true;
   error.value = "";
   try {
-    const [analyticsResp, scoreboardResp] = await Promise.all([
+    const [analyticsResp, scoreboardResp, usersResp] = await Promise.all([
       api.get<AnalyticsResponse>("/tests/analytics", {
         params: {
           limit_recent: 5,
           attempts_limit: 500
         }
       }),
-      api.get<ScoreboardResponse>("/tests/scoreboard")
+      api.get<ScoreboardResponse>("/tests/scoreboard"),
+      api.get<DirectoryUser[]>("/users")
     ]);
     analytics.value = analyticsResp.data;
     scoreboard.value = scoreboardResp.data;
+    directory.value = usersResp.data;
     questionsPage.value = 1;
+    if (!selectedRestaurant.value || !restaurantOptions.value.some((r) => r.name === selectedRestaurant.value)) {
+      selectedRestaurant.value = restaurantOptions.value[0]?.name ?? "";
+    }
     if (selectedTestId.value == null || !scoreboardResp.data.tests.some((t) => t.id === selectedTestId.value)) {
       selectedTestId.value = scoreboardResp.data.tests[0]?.id ?? null;
     }
@@ -353,6 +480,7 @@ onMounted(async () => {
     <template v-if="analytics && !loading">
       <div class="tests-tabs" role="tablist">
         <button type="button" class="tests-tab" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">Обзор</button>
+        <button type="button" class="tests-tab" :class="{ active: activeTab === 'restaurant' }" @click="activeTab = 'restaurant'">По ресторану</button>
         <button type="button" class="tests-tab" :class="{ active: activeTab === 'scores' }" @click="activeTab = 'scores'">Баллы по тестам</button>
         <button type="button" class="tests-tab" :class="{ active: activeTab === 'attempts' }" @click="activeTab = 'attempts'">Прохождения</button>
         <button type="button" class="tests-tab" :class="{ active: activeTab === 'questions' }" @click="activeTab = 'questions'">Проблемные вопросы</button>
@@ -370,6 +498,137 @@ onMounted(async () => {
         <p class="muted" style="margin-top: 14px">
           Разделы вынесены во вкладки выше. «Баллы по тестам» удобнее смотреть в режиме «По тесту» — рейтинг сотрудников по одному тесту без горизонтальной прокрутки.
         </p>
+      </div>
+
+      <div v-if="activeTab === 'restaurant'" class="card">
+        <div class="actions-row" style="flex-wrap: wrap; gap: 10px">
+          <h3 style="margin: 0">Результаты по ресторану</h3>
+          <div class="score-mode-toggle">
+            <button
+              type="button"
+              class="score-mode-btn"
+              :class="{ 'score-mode-btn--active': scoreMode === 'best' }"
+              @click="scoreMode = 'best'"
+            >
+              Лучший результат
+            </button>
+            <button
+              type="button"
+              class="score-mode-btn"
+              :class="{ 'score-mode-btn--active': scoreMode === 'last' }"
+              @click="scoreMode = 'last'"
+            >
+              Последний результат
+            </button>
+          </div>
+        </div>
+
+        <p v-if="restaurantOptions.length === 0" class="muted">Пока нет сотрудников, привязанных к ресторанам.</p>
+
+        <template v-else>
+          <!-- Язычки ресторанов -->
+          <div class="rest-chips">
+            <button
+              v-for="opt in restaurantOptions"
+              :key="opt.name"
+              type="button"
+              class="rest-chip"
+              :class="{ 'rest-chip--active': opt.name === selectedRestaurant }"
+              @click="selectedRestaurant = opt.name"
+            >
+              {{ opt.name }}
+              <span class="rest-chip-count">{{ opt.employees }}</span>
+            </button>
+          </div>
+
+          <!-- Сводка по выбранному ресторану -->
+          <div class="rest-summary">
+            <div class="rest-summary-item">
+              <span class="rest-summary-value">{{ restaurantSummary.employees }}</span>
+              <span class="rest-summary-label">сотрудников</span>
+            </div>
+            <div class="rest-summary-item">
+              <span class="rest-summary-value">{{ restaurantSummary.tested }}</span>
+              <span class="rest-summary-label">проходили тесты</span>
+            </div>
+            <div class="rest-summary-item">
+              <span class="rest-summary-value">
+                {{ restaurantSummary.avgPercent !== null ? restaurantSummary.avgPercent.toFixed(0) + "%" : "—" }}
+              </span>
+              <span class="rest-summary-label">средний балл</span>
+            </div>
+          </div>
+
+          <div style="max-width: 320px; margin: 0 0 12px">
+            <label>Поиск сотрудника</label>
+            <input v-model="restaurantSearch" placeholder="Имя или email" />
+          </div>
+
+          <p v-if="visibleRestaurantRows.length === 0" class="muted">По выбранным условиям нет сотрудников.</p>
+          <div v-else class="table-wrap">
+            <table class="rest-table">
+              <thead>
+                <tr>
+                  <th>Сотрудник</th>
+                  <th>Должность</th>
+                  <th>Тест</th>
+                  <th>Балл ({{ scoreMode === "best" ? "лучший" : "последний" }})</th>
+                  <th>Последняя попытка</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template v-for="row in visibleRestaurantRows" :key="row.key">
+                  <tr class="rest-row-first">
+                    <td :rowspan="Math.max(1, row.scores.length)" class="rest-name-cell">
+                      <div>{{ row.name }}</div>
+                      <div class="muted" style="font-size: 12px">{{ row.email }}</div>
+                      <span
+                        v-if="rowAvgPercent(row) !== null"
+                        class="score-badge rest-avg-badge"
+                        :class="avgBadgeClass(rowAvgPercent(row)!)"
+                        title="Средний балл по всем тестам сотрудника"
+                      >
+                        среднее {{ rowAvgPercent(row)!.toFixed(0) }}%
+                      </span>
+                    </td>
+                    <td :rowspan="Math.max(1, row.scores.length)" class="rest-job-cell">
+                      {{ row.jobTitle || "—" }}
+                    </td>
+                    <template v-if="row.scores.length > 0">
+                      <td>{{ row.scores[0].testTitle }}</td>
+                      <td>
+                        <span class="score-badge" :class="scoreCellClass(row.scores[0].cell)">
+                          {{ cellScoreText(row.scores[0].cell) }}
+                          <span class="score-badge-percent">{{ cellPercent(row.scores[0].cell).toFixed(0) }}%</span>
+                        </span>
+                        <span v-if="row.scores[0].cell.attempts_count > 1" class="muted score-attempts">
+                          ×{{ row.scores[0].cell.attempts_count }}
+                        </span>
+                      </td>
+                      <td class="muted">{{ formatDate(row.scores[0].cell.last_finished_at) }}</td>
+                    </template>
+                    <template v-else>
+                      <td colspan="3" class="muted">Тестов пока не проходил</td>
+                    </template>
+                  </tr>
+                  <tr v-for="score in row.scores.slice(1)" :key="score.testId">
+                    <td>{{ score.testTitle }}</td>
+                    <td>
+                      <span class="score-badge" :class="scoreCellClass(score.cell)">
+                        {{ cellScoreText(score.cell) }}
+                        <span class="score-badge-percent">{{ cellPercent(score.cell).toFixed(0) }}%</span>
+                      </span>
+                      <span v-if="score.cell.attempts_count > 1" class="muted score-attempts">
+                        ×{{ score.cell.attempts_count }}
+                      </span>
+                    </td>
+                    <td class="muted">{{ formatDate(score.cell.last_finished_at) }}</td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </template>
       </div>
 
       <div v-if="activeTab === 'scores'" class="card">
@@ -831,5 +1090,91 @@ onMounted(async () => {
 .pager-info {
   font-size: 13px;
   color: #64748b;
+}
+
+/* Вкладка «По ресторану» */
+.rest-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+.rest-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+  border: 1px solid #d0d8e5;
+  border-radius: 999px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.rest-chip:hover {
+  background: #f5f8ff;
+  border-color: #c5d4f0;
+  color: #1d4ed8;
+}
+.rest-chip--active,
+.rest-chip--active:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.rest-chip-count {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+  font-size: 12px;
+}
+.rest-chip--active .rest-chip-count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+.rest-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+.rest-summary-item {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.rest-summary-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1e293b;
+}
+.rest-summary-label {
+  font-size: 13px;
+  color: #64748b;
+}
+/* Группировка строк по сотруднику */
+.rest-table td {
+  vertical-align: top;
+}
+.rest-row-first td {
+  border-top: 2px solid #e2e8f0;
+}
+.rest-name-cell {
+  min-width: 200px;
+}
+.rest-job-cell {
+  min-width: 130px;
+}
+.rest-avg-badge {
+  margin-top: 6px;
+  font-size: 12px;
 }
 </style>
