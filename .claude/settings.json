@@ -18,7 +18,19 @@
       "PowerShell($env:DATABASE_URL='postgresql+psycopg2://x:x@localhost:5432/x'; $env:JWT_SECRET_KEY='t'; $env:BOOTSTRAP_SUPERADMIN_EMAIL='t@t.t'; $env:BOOTSTRAP_SUPERADMIN_PASSWORD='t'; Set-Location 'c:\\\\Users\\\\anato\\\\OneDrive\\\\Desktop\\\\projects\\\\chaychona_website\\\\backend'; python -c \"import app.main; from app.core.security import verify_password; print\\('backend OK'\\); print\\('bad hash ->', verify_password\\('x', 'not-a-hash'\\)\\)\")",
       "PowerShell(Set-Location 'c:\\\\Users\\\\anato\\\\OneDrive\\\\Desktop\\\\projects\\\\chaychona_website\\\\frontend'; npm run build 2>&1 | Select-Object -Last 4; $env:NODE_OPTIONS='--no-webstorage'; npx vitest run 2>&1 | Select-Object -Last 12)",
       "PowerShell($env:DATABASE_URL='postgresql://x:x@localhost/x'; $env:JWT_SECRET_KEY='test'; $env:BOOTSTRAP_SUPERADMIN_EMAIL='a@b.c'; $env:BOOTSTRAP_SUPERADMIN_PASSWORD='password123'; Set-Location \"c:\\\\Users\\\\anato\\\\OneDrive\\\\Desktop\\\\projects\\\\chaychona_website\\\\backend\"; python -c \"import app.main; print\\('backend import OK'\\)\")",
-      "PowerShell($env:DATABASE_URL='postgresql://x:x@localhost/x'; $env:JWT_SECRET_KEY='test'; $env:BOOTSTRAP_SUPERADMIN_EMAIL='a@b.c'; $env:BOOTSTRAP_SUPERADMIN_PASSWORD='password123'; Set-Location \"c:\\\\Users\\\\anato\\\\OneDrive\\\\Desktop\\\\projects\\\\chaychona_website\\\\backend\"; python -m pytest tests -q)"
+      "PowerShell($env:DATABASE_URL='postgresql://x:x@localhost/x'; $env:JWT_SECRET_KEY='test'; $env:BOOTSTRAP_SUPERADMIN_EMAIL='a@b.c'; $env:BOOTSTRAP_SUPERADMIN_PASSWORD='password123'; Set-Location \"c:\\\\Users\\\\anato\\\\OneDrive\\\\Desktop\\\\projects\\\\chaychona_website\\\\backend\"; python -m pytest tests -q)",
+      "Read(//tmp/**)",
+      "Read(//c//**)",
+      "Bash(python -c \"import sys,json;print\\(len\\(json.load\\(sys.stdin\\)\\)\\)\")",
+      "Bash(python -c ' *)",
+      "Skill(artifact-design)",
+      "Skill(artifact-design:*)",
+      "Bash(npm ls *)",
+      "Bash(npm view *)",
+      "Bash(timeout 180 npx vite build)",
+      "Bash(NODE_OPTIONS=--no-webstorage timeout 180 npx vitest run)",
+      "Bash(timeout 180 npx vitest run)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5199/)"
     ]
   }
 }
