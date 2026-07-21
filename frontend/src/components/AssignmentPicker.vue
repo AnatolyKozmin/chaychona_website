@@ -17,10 +17,15 @@ interface Assignment {
   job_title_id: string;
 }
 
-const props = defineProps<{
-  restaurants: RestaurantWithRoles[];
-  modelValue: Assignment[];
-}>();
+const props = withDefaults(
+  defineProps<{
+    restaurants: RestaurantWithRoles[];
+    modelValue: Assignment[];
+    /** Существительное для подсказки: «будет доступен {{ noun }}». */
+    noun?: string;
+  }>(),
+  { noun: "тест" }
+);
 
 const emit = defineEmits<{ (e: "update:modelValue", value: Assignment[]): void }>();
 
@@ -60,7 +65,7 @@ const selectedCount = computed(() => props.modelValue.length);
 <template>
   <div class="assignment-picker">
     <p class="muted" style="margin: 0 0 8px 0">
-      Отметьте галочками, в каких ресторанах и для каких ролей будет доступен тест.
+      Отметьте галочками, в каких ресторанах и для каких ролей будет доступен {{ noun }}.
       <span v-if="selectedCount > 0">Выбрано: {{ selectedCount }}.</span>
     </p>
     <p v-if="restaurants.length === 0" class="muted">

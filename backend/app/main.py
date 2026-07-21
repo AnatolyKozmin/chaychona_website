@@ -85,6 +85,21 @@ def _run_startup() -> None:
                 ")"
             )
         )
+        # Мульти-привязка стандартов (курсов): перенести существующую одиночную пару
+        # (ресторан, роль) из courses в course_assignments (таблицу создаёт create_all).
+        # Курсы с NULL в паре означают «доступно всем» — их не переносим.
+        connection.execute(
+            text(
+                "INSERT INTO course_assignments (course_id, restaurant_id, job_title_id, created_at) "
+                "SELECT c.id, c.restaurant_id, c.job_title_id, NOW() "
+                "FROM courses c "
+                "WHERE c.restaurant_id IS NOT NULL AND c.job_title_id IS NOT NULL "
+                "AND NOT EXISTS ("
+                "  SELECT 1 FROM course_assignments a "
+                "  WHERE a.course_id = c.id AND a.restaurant_id = c.restaurant_id AND a.job_title_id = c.job_title_id"
+                ")"
+            )
+        )
         # Ответы попыток не должны блокировать обновление теста: вопрос может быть
         # пересоздан, ссылка обнуляется, история хранится в текстовых полях ответа.
         connection.execute(text("ALTER TABLE quiz_attempt_answers ALTER COLUMN question_id DROP NOT NULL"))

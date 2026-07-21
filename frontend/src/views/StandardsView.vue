@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "../api/client";
 import { useAuthStore } from "../stores/auth";
+import AssignmentPicker from "../components/AssignmentPicker.vue";
 
 interface CourseBlock {
   id: number;
@@ -23,6 +24,13 @@ interface CourseSubBlock {
   sort_order: number;
 }
 
+interface CourseAssignment {
+  restaurant_id: string;
+  restaurant_name: string;
+  job_title_id: string;
+  job_title_name: string;
+}
+
 interface Course {
   id: number;
   title: string;
@@ -31,6 +39,7 @@ interface Course {
   restaurant_name: string | null;
   job_title_id: string | null;
   job_title_name: string | null;
+  assignments: CourseAssignment[];
   linked_test: { id: number; title: string } | null;
   is_active: boolean;
   created_at: string;
@@ -99,16 +108,11 @@ const adminAllowed = computed(() => auth.isAdmin || auth.isSuperadmin);
 const form = reactive({
   title: "",
   description: "",
-  restaurant_id: "",
-  job_title_id: "",
+  assignments: [] as Array<{ restaurant_id: string; job_title_id: string }>,
   linked_test_id: "",
   is_active: true,
   blocks: [{ heading: "", text: "", image_path: "", sort_order: 0, subblocks: [] as Array<{ heading: string; text: string; image_path: string; sort_order: number }> }]
 });
-
-const availableRoles = computed(
-  () => restaurants.value.find((item) => item.id === form.restaurant_id)?.roles ?? []
-);
 
 function toMediaUrl(path: string | null): string | null {
   if (!path) return null;
@@ -168,18 +172,13 @@ async function loadAdminRefs() {
     restaurant_id: item.restaurant_id,
     job_title_id: item.job_title_id
   }));
-  if (!form.restaurant_id && restaurants.value.length > 0) {
-    form.restaurant_id = restaurants.value[0].id;
-    form.job_title_id = restaurants.value[0].roles[0]?.id ?? "";
-  }
 }
 
 function resetForm() {
   adminEditingId.value = null;
   form.title = "";
   form.description = "";
-  form.restaurant_id = restaurants.value[0]?.id ?? "";
-  form.job_title_id = restaurants.value[0]?.roles[0]?.id ?? "";
+  form.assignments = [];
   form.linked_test_id = "";
   form.is_active = true;
   form.blocks = [{ heading: "", text: "", image_path: "", sort_order: 0, subblocks: [] }];
@@ -249,8 +248,17 @@ function editCourse(course: Course) {
   adminEditingId.value = course.id;
   form.title = course.title;
   form.description = course.description || "";
-  form.restaurant_id = course.restaurant_id || "";
-  form.job_title_id = course.job_title_id || "";
+  // Пары из назначений; для старых курсов без назначений — одиночная legacy-пара, если есть.
+  if (course.assignments.length > 0) {
+    form.assignments = course.assignments.map((a) => ({
+      restaurant_id: a.restaurant_id,
+      job_title_id: a.job_title_id
+    }));
+  } else if (course.restaurant_id && course.job_title_id) {
+    form.assignments = [{ restaurant_id: course.restaurant_id, job_title_id: course.job_title_id }];
+  } else {
+    form.assignments = [];
+  }
   form.linked_test_id = course.linked_test ? String(course.linked_test.id) : "";
   form.is_active = course.is_active;
   form.blocks = course.blocks.map((block) => ({
@@ -279,8 +287,7 @@ async function saveCourse() {
     const payload = {
       title: form.title,
       description: form.description || null,
-      restaurant_id: form.restaurant_id || null,
-      job_title_id: form.job_title_id || null,
+      assignments: form.assignments,
       linked_test_id: form.linked_test_id ? Number(form.linked_test_id) : null,
       is_active: form.is_active,
       blocks: form.blocks.map((block, idx) => ({
@@ -403,22 +410,11 @@ watch(
       <label>Описание</label>
       <input v-model="form.description" />
 
-      <div class="actions-row">
-        <div style="flex: 1">
-          <label>Ресторан (кому назначено)</label>
-          <select v-model="form.restaurant_id">
-            <option value="">Все рестораны</option>
-            <option v-for="item in restaurants" :key="item.id" :value="item.id">{{ item.name }}</option>
-          </select>
-        </div>
-        <div style="flex: 1">
-          <label>Роль (кому назначено)</label>
-          <select v-model="form.job_title_id">
-            <option value="">Все роли</option>
-            <option v-for="role in availableRoles" :key="role.id" :value="role.id">{{ role.name }}</option>
-          </select>
-        </div>
-      </div>
+      <label>Кому назначено (рестораны и роли)</label>
+      <AssignmentPicker v-model="form.assignments" :restaurants="restaurants" noun="стандарт" />
+      <p class="muted" style="margin: 4px 0 0 0">
+        Можно отметить сразу несколько ролей. Если ничего не отмечено — стандарт доступен всем.
+      </p>
 
       <label>Тест в конце курса (опционально)</label>
       <select v-model="form.linked_test_id">
@@ -503,7 +499,14 @@ watch(
         <tbody>
           <tr v-for="course in courses" :key="course.id">
             <td>{{ course.title }}</td>
-            <td>{{ course.restaurant_name || "Все" }} / {{ course.job_title_name || "Все" }}</td>
+            <td>
+              <span v-if="course.assignments.length === 0" class="muted">Все</span>
+              <div v-else class="std-chips">
+                <span v-for="a in course.assignments" :key="a.restaurant_id + a.job_title_id" class="std-chip">
+                  {{ a.restaurant_name }} · {{ a.job_title_name }}
+                </span>
+              </div>
+            </td>
             <td>{{ course.blocks.length }}</td>
             <td>{{ course.linked_test?.title || "-" }}</td>
             <td>
@@ -518,3 +521,22 @@ watch(
     </div>
   </section>
 </template>
+
+<style scoped>
+.std-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.std-chip {
+  display: inline-flex;
+  align-items: center;
+  background: #eef4ff;
+  color: #2563eb;
+  border: 1px solid #d5e2fb;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+</style>

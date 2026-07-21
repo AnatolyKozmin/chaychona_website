@@ -7,10 +7,11 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.db.session import get_db
-from app.models.course import Course, CourseBlock, CourseBlockProgress, CourseSubBlock
+from app.models.course import Course, CourseAssignment, CourseBlock, CourseBlockProgress, CourseSubBlock
 from app.models.quiz import QuizAttempt, QuizTest
 from app.models.user import JobTitleCatalog, RestaurantCatalog, Role, User
 from app.schemas.course import (
+    CourseAssignmentPublic,
     CourseBlockPublic,
     CourseCreate,
     CourseLearnerBlockProgressPublic,
@@ -42,6 +43,90 @@ def _parse_uuid_or_400(value: str | None, field_name: str) -> UUID | None:
         return UUID(value)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Некорректный {field_name}") from exc
+
+
+def _validate_restaurant_role(
+    db: Session, restaurant_id: UUID, job_title_id: UUID
+) -> tuple[RestaurantCatalog, JobTitleCatalog]:
+    restaurant = db.get(RestaurantCatalog, restaurant_id)
+    if not restaurant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ресторан не найден")
+    job_title = db.get(JobTitleCatalog, job_title_id)
+    if not job_title:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Роль не найдена")
+    if job_title.restaurant_id != restaurant.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Выбранная роль не принадлежит выбранному ресторану",
+        )
+    return restaurant, job_title
+
+
+def _resolve_course_assignments(
+    db: Session, payload: CourseCreate
+) -> list[tuple[RestaurantCatalog, JobTitleCatalog]]:
+    """Собрать пары (ресторан, роль) из payload.assignments или из одиночных полей (legacy).
+
+    В отличие от тестов пустой список допустим — стандарт доступен всем.
+    Возвращает провалидированный список без дубликатов, сохраняя порядок.
+    """
+    raw_pairs: list[tuple[str, str]] = []
+    if payload.assignments:
+        raw_pairs = [(a.restaurant_id, a.job_title_id) for a in payload.assignments]
+    elif payload.restaurant_id and payload.job_title_id:
+        raw_pairs = [(payload.restaurant_id, payload.job_title_id)]
+
+    resolved: list[tuple[RestaurantCatalog, JobTitleCatalog]] = []
+    seen: set[tuple[UUID, UUID]] = set()
+    for restaurant_id_raw, job_title_id_raw in raw_pairs:
+        restaurant_id = _parse_uuid_or_400(restaurant_id_raw, "id ресторана")
+        job_title_id = _parse_uuid_or_400(job_title_id_raw, "id роли")
+        if restaurant_id is None or job_title_id is None:
+            continue
+        key = (restaurant_id, job_title_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        resolved.append(_validate_restaurant_role(db, restaurant_id, job_title_id))
+    return resolved
+
+
+def _sync_course_assignments(
+    db: Session, course: Course, pairs: list[tuple[RestaurantCatalog, JobTitleCatalog]]
+) -> None:
+    """Привести строки course_assignments в соответствие со списком pairs."""
+    wanted = {(restaurant.id, job_title.id) for restaurant, job_title in pairs}
+    existing = list(db.scalars(select(CourseAssignment).where(CourseAssignment.course_id == course.id)).all())
+    existing_keys = {(a.restaurant_id, a.job_title_id) for a in existing}
+
+    for assignment in existing:
+        if (assignment.restaurant_id, assignment.job_title_id) not in wanted:
+            db.delete(assignment)
+    for restaurant, job_title in pairs:
+        if (restaurant.id, job_title.id) not in existing_keys:
+            db.add(CourseAssignment(course_id=course.id, restaurant_id=restaurant.id, job_title_id=job_title.id))
+
+
+def _build_course_assignments(db: Session, course: Course) -> list[CourseAssignmentPublic]:
+    rows = list(
+        db.scalars(select(CourseAssignment).where(CourseAssignment.course_id == course.id)).all()
+    )
+    result: list[CourseAssignmentPublic] = []
+    for row in rows:
+        restaurant = db.get(RestaurantCatalog, row.restaurant_id)
+        job_title = db.get(JobTitleCatalog, row.job_title_id)
+        if not restaurant or not job_title:
+            continue
+        result.append(
+            CourseAssignmentPublic(
+                restaurant_id=str(restaurant.id),
+                restaurant_name=restaurant.name,
+                job_title_id=str(job_title.id),
+                job_title_name=job_title.name,
+            )
+        )
+    result.sort(key=lambda a: (a.restaurant_name.lower(), a.job_title_name.lower()))
+    return result
 
 
 def _build_course_public(db: Session, course: Course) -> CoursePublic:
@@ -88,6 +173,7 @@ def _build_course_public(db: Session, course: Course) -> CoursePublic:
         restaurant_name=restaurant.name if restaurant else None,
         job_title_id=str(course.job_title_id) if course.job_title_id else None,
         job_title_name=job_title.name if job_title else None,
+        assignments=_build_course_assignments(db, course),
         linked_test=CourseLinkedTestPublic(id=linked_test.id, title=linked_test.title) if linked_test else None,
         is_active=course.is_active,
         created_at=course.created_at,
@@ -118,6 +204,30 @@ def _query_courses_for_user(db: Session, current_user: User) -> list[Course]:
     user_job_title = _norm(current_user.job_title)
     filtered: list[Course] = []
     for course in courses:
+        assignments = list(
+            db.scalars(select(CourseAssignment).where(CourseAssignment.course_id == course.id)).all()
+        )
+        if assignments:
+            # Есть явные назначения — доступ, если совпадает хотя бы одна пара (ресторан + роль).
+            matched = False
+            for assignment in assignments:
+                a_restaurant = db.get(RestaurantCatalog, assignment.restaurant_id)
+                a_job_title = db.get(JobTitleCatalog, assignment.job_title_id)
+                if not a_restaurant or not a_job_title:
+                    continue
+                if (
+                    bool(user_restaurant)
+                    and bool(user_job_title)
+                    and _norm(a_restaurant.name) == user_restaurant
+                    and _norm(a_job_title.name) == user_job_title
+                ):
+                    matched = True
+                    break
+            if matched:
+                filtered.append(course)
+            continue
+
+        # Нет назначений — legacy: NULL в паре означает «доступно всем».
         course_restaurant = db.get(RestaurantCatalog, course.restaurant_id) if course.restaurant_id else None
         course_job_title = db.get(JobTitleCatalog, course.job_title_id) if course.job_title_id else None
         matches_restaurant = (
@@ -257,30 +367,24 @@ def create_course_admin(
     _: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN)),
     db: Session = Depends(get_db),
 ):
-    restaurant_id = _parse_uuid_or_400(payload.restaurant_id, "restaurant_id")
-    job_title_id = _parse_uuid_or_400(payload.job_title_id, "job_title_id")
-    if restaurant_id and not db.get(RestaurantCatalog, restaurant_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ресторан не найден")
-    if job_title_id:
-        role = db.get(JobTitleCatalog, job_title_id)
-        if not role:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Роль не найдена")
-        if restaurant_id and role.restaurant_id != restaurant_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Роль не принадлежит ресторану")
+    pairs = _resolve_course_assignments(db, payload)
+    primary_restaurant = pairs[0][0] if pairs else None
+    primary_job_title = pairs[0][1] if pairs else None
     if payload.linked_test_id and not db.get(QuizTest, payload.linked_test_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Тест не найден")
 
     course = Course(
         title=payload.title.strip(),
         description=payload.description.strip() if payload.description else None,
-        restaurant_id=restaurant_id,
-        job_title_id=job_title_id,
+        restaurant_id=primary_restaurant.id if primary_restaurant else None,
+        job_title_id=primary_job_title.id if primary_job_title else None,
         linked_test_id=payload.linked_test_id,
         is_active=payload.is_active,
     )
     db.add(course)
     try:
         db.flush([course])
+        _sync_course_assignments(db, course, pairs)
         _replace_blocks(db, course.id, payload.blocks)
         db.commit()
     except (SQLAlchemyError, HTTPException):
@@ -302,26 +406,20 @@ def update_course_admin(
     course = db.get(Course, course_id)
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Курс не найден")
-    restaurant_id = _parse_uuid_or_400(payload.restaurant_id, "restaurant_id")
-    job_title_id = _parse_uuid_or_400(payload.job_title_id, "job_title_id")
-    if restaurant_id and not db.get(RestaurantCatalog, restaurant_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ресторан не найден")
-    if job_title_id:
-        role = db.get(JobTitleCatalog, job_title_id)
-        if not role:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Роль не найдена")
-        if restaurant_id and role.restaurant_id != restaurant_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Роль не принадлежит ресторану")
+    pairs = _resolve_course_assignments(db, payload)
+    primary_restaurant = pairs[0][0] if pairs else None
+    primary_job_title = pairs[0][1] if pairs else None
     if payload.linked_test_id and not db.get(QuizTest, payload.linked_test_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Тест не найден")
 
     course.title = payload.title.strip()
     course.description = payload.description.strip() if payload.description else None
-    course.restaurant_id = restaurant_id
-    course.job_title_id = job_title_id
+    course.restaurant_id = primary_restaurant.id if primary_restaurant else None
+    course.job_title_id = primary_job_title.id if primary_job_title else None
     course.linked_test_id = payload.linked_test_id
     course.is_active = payload.is_active
     try:
+        _sync_course_assignments(db, course, pairs)
         _replace_blocks(db, course.id, payload.blocks)
         db.commit()
     except (SQLAlchemyError, HTTPException):
@@ -342,6 +440,7 @@ def delete_course_admin(
     course = db.get(Course, course_id)
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Курс не найден")
+    db.execute(delete(CourseAssignment).where(CourseAssignment.course_id == course.id))
     db.execute(delete(CourseBlockProgress).where(CourseBlockProgress.course_id == course.id))
     blocks = list(db.scalars(select(CourseBlock).where(CourseBlock.course_id == course.id)).all())
     for block in blocks:

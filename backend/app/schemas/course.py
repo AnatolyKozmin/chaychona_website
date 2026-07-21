@@ -18,11 +18,18 @@ class CourseSubBlockCreate(BaseModel):
     sort_order: int = 0
 
 
+class CourseAssignmentInput(BaseModel):
+    restaurant_id: str
+    job_title_id: str
+
+
 class CourseCreate(BaseModel):
     title: str = Field(min_length=2, max_length=255)
     description: str | None = Field(default=None, max_length=5000)
+    # Одиночная пара (legacy) ИЛИ список assignments. Пустой список = доступно всем.
     restaurant_id: str | None = None
     job_title_id: str | None = None
+    assignments: list[CourseAssignmentInput] = Field(default_factory=list)
     linked_test_id: int | None = None
     is_active: bool = True
     blocks: list[CourseBlockCreate] = Field(default_factory=list, min_length=1)
@@ -52,14 +59,24 @@ class CourseLinkedTestPublic(BaseModel):
     title: str
 
 
+class CourseAssignmentPublic(BaseModel):
+    restaurant_id: str
+    restaurant_name: str
+    job_title_id: str
+    job_title_name: str
+
+
 class CoursePublic(BaseModel):
     id: int
     title: str
     description: str | None
+    # Первичная пара (для обратной совместимости); NULL = доступно всем.
     restaurant_id: str | None
     restaurant_name: str | None
     job_title_id: str | None
     job_title_name: str | None
+    # Все пары, на которые назначен стандарт. Пустой список = доступно всем.
+    assignments: list[CourseAssignmentPublic]
     linked_test: CourseLinkedTestPublic | None
     is_active: bool
     created_at: datetime
