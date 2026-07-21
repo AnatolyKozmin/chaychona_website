@@ -12,6 +12,18 @@
 
 html {
   scrollbar-gutter: stable;
+  /* Не давать iOS/Android самовольно масштабировать текст (напр. при повороте). */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Отсекать любое горизонтальное переполнение, чтобы страницу не таскало вбок.
+     clip (в отличие от hidden) не создаёт скролл-контейнер и не ломает sticky-шапку. */
+  overflow-x: clip;
+}
+
+/* Картинки/видео не должны вылезать за ширину экрана и провоцировать зум. */
+img,
+video {
+  max-width: 100%;
 }
 
 body {
@@ -2399,6 +2411,14 @@ tr:hover td {
 }
 
 @media (max-width: 768px) {
+  /* iOS Safari приближает страницу при фокусе на поле со шрифтом < 16px.
+     Форсируем 16px для всех полей ввода, чтобы автозума не было. */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
   .auth-grid {
     grid-template-columns: 1fr;
   }
