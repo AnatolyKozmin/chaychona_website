@@ -482,6 +482,9 @@ def update_dish_admin(
     if category and category.restaurant_id and not restaurant_uuid:
         restaurant_uuid = category.restaurant_id
 
+    prev_source = _video_source_media(dish)
+    prev_video = dish.video_path
+
     dish.name = payload.name.strip()
     dish.ingredients = payload.ingredients.strip() if payload.ingredients else None
     dish.description = payload.description.strip() if payload.description else None
@@ -495,9 +498,23 @@ def update_dish_admin(
     dish.photo_ingredients_path = _normalize_upload_relpath(payload.photo_ingredients_path)
     dish.audio_path = _normalize_upload_relpath(payload.audio_path)
     dish.video_path = _normalize_upload_relpath(payload.video_path)
+
+    # Сменили озвучку или исходное фото — старое видео уже не соответствует
+    # содержимому, ставим пересборку. Если видео заменили вручную в этом же
+    # запросе — уважаем ручной выбор и ничего не пересобираем.
+    regenerate = (
+        _video_source_media(dish) != prev_source
+        and dish.video_path == prev_video
+        and _dish_has_media(dish)
+    )
+
     db.commit()
     db.refresh(dish)
-    return _build_dish_admin_public(db, dish)
+
+    result = _build_dish_admin_public(db, dish)
+    # Строго после коммита новых путей — иначе воркер может успеть склеить по старым.
+    result.video_job_queued = _enqueue_video_job(db, dish.id) if regenerate else False
+    return result
 
 
 @router.delete("/admin/dishes/{dish_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -716,6 +733,32 @@ def list_import_jobs(
 
 def _dish_has_media(dish: MenuDish) -> bool:
     return bool((dish.photo_ingredients_path or dish.photo_dish_path) and dish.audio_path)
+
+
+def _video_source_media(dish: MenuDish) -> tuple[str | None, str | None]:
+    """Исходники, из которых воркер склеивает видео (см. video_worker._process_job)."""
+    return (dish.photo_ingredients_path or dish.photo_dish_path, dish.audio_path)
+
+
+def _enqueue_video_job(db: Session, dish_id: int) -> bool:
+    """Поставить блюдо в очередь на пересборку видео после смены медиа.
+
+    Дедуп только по `pending`: такое задание ещё не читало блюдо и склеит уже
+    новые файлы. А вот `processing` мог успеть прочитать СТАРУЮ озвучку до
+    нашего коммита — тогда нужно отдельное задание, иначе видео так и останется
+    со старым голосом. Вызывать строго ПОСЛЕ коммита новых путей.
+    """
+    pending = db.scalar(
+        select(MenuDishVideoJob.id).where(
+            MenuDishVideoJob.dish_id == dish_id,
+            MenuDishVideoJob.status == "pending",
+        )
+    )
+    if pending is not None:
+        return False
+    db.add(MenuDishVideoJob(dish_id=dish_id, status="pending"))
+    db.commit()
+    return True
 
 
 def _active_video_dish_ids(db: Session, dish_ids: set[int] | None = None) -> set[int]:

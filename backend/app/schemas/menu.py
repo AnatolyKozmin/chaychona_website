@@ -67,6 +67,7 @@ class MenuDishAdminPublic(BaseModel):
     photo_ingredients_path: str | None
     audio_path: str | None
     video_path: str | None
+    video_job_queued: bool = False  # видео поставлено на пересборку (сменили фото/озвучку)
 
 
 class MenuDishCreate(BaseModel):

@@ -610,8 +610,16 @@ async function saveDish() {
       video_path: dishForm.video_path || null
     };
     if (editingDishId.value) {
-      await api.put(`/menu/admin/dishes/${editingDishId.value}`, payload);
-      adminSuccess.value = "Позиция обновлена";
+      const { data } = await api.put<{ video_job_queued?: boolean }>(
+        `/menu/admin/dishes/${editingDishId.value}`,
+        payload
+      );
+      if (data?.video_job_queued) {
+        adminSuccess.value = "Позиция обновлена. Видео пересоздаётся под новую озвучку/фото…";
+        await refreshVideoJobs();
+      } else {
+        adminSuccess.value = "Позиция обновлена";
+      }
     } else {
       await api.post("/menu/admin/dishes", payload);
       adminSuccess.value = "Позиция создана";
