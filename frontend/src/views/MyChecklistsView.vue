@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
 import { api } from "../api/client";
 
 interface ChecklistItem {
@@ -17,8 +16,6 @@ interface Checklist {
   items: ChecklistItem[];
 }
 
-const router = useRouter();
-const route = useRoute();
 const loading = ref(false);
 const submitting = ref(false);
 const error = ref("");
@@ -63,6 +60,14 @@ function goBack() {
   photoPaths.value = {};
 }
 
+function itemWordForm(count: number): string {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  if (last === 1 && lastTwo !== 11) return "пункт";
+  if (last >= 2 && last <= 4 && (lastTwo < 10 || lastTwo >= 20)) return "пункта";
+  return "пунктов";
+}
+
 async function onPhotoUpload(itemId: number, event: Event) {
   const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
@@ -82,6 +87,15 @@ async function onPhotoUpload(itemId: number, event: Event) {
   }
 }
 
+function toggleItem(itemId: number) {
+  checkedItems.value[itemId] = !checkedItems.value[itemId];
+}
+
+const checkedCount = computed(() => {
+  if (!activeChecklist.value) return 0;
+  return activeChecklist.value.items.filter((item) => checkedItems.value[item.id]).length;
+});
+
 const canSubmit = computed(() => {
   if (!activeChecklist.value) return false;
   for (const item of activeChecklist.value.items) {
@@ -89,6 +103,19 @@ const canSubmit = computed(() => {
     if (item.requires_photo && !photoPaths.value[item.id]) return false;
   }
   return true;
+});
+
+/** Почему кнопка «Завершить» ещё не активна — иначе она просто серая без объяснений. */
+const blockedReason = computed(() => {
+  if (!activeChecklist.value || canSubmit.value) return "";
+  const total = activeChecklist.value.items.length;
+  if (checkedCount.value < total) {
+    return `Отмечено ${checkedCount.value} из ${total}`;
+  }
+  const missing = activeChecklist.value.items.filter(
+    (item) => item.requires_photo && !photoPaths.value[item.id]
+  ).length;
+  return missing > 0 ? `Не приложено фото: ${missing}` : "";
 });
 
 async function submitChecklist() {
@@ -124,57 +151,74 @@ onMounted(async () => {
 
     <template v-if="!activeChecklist">
       <p v-if="!loading && checklists.length === 0" class="muted">Для вас пока нет назначенных чек-листов.</p>
-      <div v-else class="checklist-grid">
-        <div
+      <div v-else class="cl-list">
+        <button
           v-for="cl in checklists"
           :key="cl.id"
-          class="checklist-card"
+          type="button"
+          class="cl-row"
           @click="openChecklist(cl)"
         >
-          <h3 class="checklist-card-title">{{ cl.title }}</h3>
-          <p v-if="cl.shift_type_name" class="muted checklist-card-meta">{{ cl.shift_type_name }}</p>
-          <p class="checklist-card-items">{{ cl.items.length }} пунктов</p>
-        </div>
+          <span class="cl-row-text">
+            <strong>{{ cl.title }}</strong>
+            <span class="cl-row-meta">
+              <template v-if="cl.shift_type_name">{{ cl.shift_type_name }} · </template>
+              {{ cl.items.length }} {{ itemWordForm(cl.items.length) }}
+            </span>
+          </span>
+          <span class="cl-row-go" aria-hidden="true">→</span>
+        </button>
       </div>
     </template>
 
     <template v-else>
-      <div class="checklist-fill-header">
-        <button type="button" class="ghost" @click="goBack">← Назад</button>
-        <h3 style="margin: 0">{{ activeChecklist.title }}</h3>
+      <div class="cl-head">
+        <button type="button" class="ghost cl-back" @click="goBack">← Назад</button>
+        <h3 class="cl-head-title">{{ activeChecklist.title }}</h3>
       </div>
 
-      <div class="checklist-fill-items">
+      <div class="cl-items">
         <div
           v-for="item in activeChecklist.items"
           :key="item.id"
-          class="checklist-fill-item"
-          :class="{ 'checklist-fill-item--checked': checkedItems[item.id] }"
+          class="cl-item"
+          :class="{ 'cl-item--checked': checkedItems[item.id] }"
         >
-          <label class="checklist-fill-label">
-            <input type="checkbox" v-model="checkedItems[item.id]" />
-            <span class="checklist-fill-text">{{ item.title }}</span>
-          </label>
-          <div v-if="item.requires_photo" class="checklist-fill-photo">
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              @change="onPhotoUpload(item.id, $event)"
-            />
+          <button
+            type="button"
+            class="cl-item-hit"
+            :aria-pressed="Boolean(checkedItems[item.id])"
+            @click="toggleItem(item.id)"
+          >
+            <span class="cl-box" aria-hidden="true">✓</span>
+            <span class="cl-item-text">{{ item.title }}</span>
+          </button>
+
+          <div v-if="item.requires_photo" class="cl-photo" :class="{ filled: photoPaths[item.id] }">
             <img
               v-if="photoPaths[item.id]"
               :src="toMediaUrl(photoPaths[item.id]) || undefined"
-              alt=""
-              class="checklist-fill-preview"
+              alt="Приложенное фото"
+              class="cl-photo-preview"
             />
-            <span v-else class="muted">Приложить фото</span>
+            <span class="cl-photo-text">{{ photoPaths[item.id] ? "Фото приложено" : "Нужно фото" }}</span>
+            <label class="cl-photo-btn">
+              {{ photoPaths[item.id] ? "Переснять" : "Снять" }}
+              <!-- capture=environment открывает сразу заднюю камеру, а не галерею -->
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                @change="onPhotoUpload(item.id, $event)"
+              />
+            </label>
           </div>
         </div>
       </div>
 
-      <div class="checklist-fill-actions">
-        <button type="button" :disabled="!canSubmit || submitting" @click="submitChecklist">
+      <div class="cl-foot">
+        <p v-if="blockedReason" class="cl-foot-hint">{{ blockedReason }}</p>
+        <button type="button" class="cl-submit" :disabled="!canSubmit || submitting" @click="submitChecklist">
           {{ submitting ? "Отправка..." : "Завершить" }}
         </button>
       </div>

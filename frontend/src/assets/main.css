@@ -3031,3 +3031,207 @@ tr:hover td {
   margin: 0;
   min-height: 48px;
 }
+
+/* ============================================================
+   Чек-листы смены — экран сотрудника
+   ============================================================ */
+.cl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cl-row {
+  width: 100%;
+  margin: 0;
+  padding: 15px 16px;
+  border: 1px solid #e5ebf6;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+}
+
+.cl-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cl-row-text strong {
+  font-size: 0.98rem;
+}
+
+.cl-row-meta {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.cl-row-go {
+  color: #94a3b8;
+  flex: none;
+}
+
+.cl-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.cl-back {
+  width: auto;
+  margin: 0;
+  padding: 9px 13px;
+  flex: none;
+}
+
+.cl-head-title {
+  margin: 0;
+  font-size: 1.05rem;
+  min-width: 0;
+}
+
+.cl-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* место под липкую кнопку внизу */
+  padding-bottom: 12px;
+}
+
+.cl-item {
+  border: 1px solid #e5ebf6;
+  background: #fff;
+}
+
+.cl-item--checked {
+  border-color: #bfe3cd;
+}
+
+.cl-item-hit {
+  width: 100%;
+  margin: 0;
+  padding: 15px 16px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  /* палец должен попадать по строке целиком, а не по галочке 16×16 */
+  min-height: 56px;
+}
+
+.cl-box {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 2px solid #dbe3f0;
+  display: grid;
+  place-items: center;
+  color: transparent;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.cl-item--checked .cl-box {
+  background: #2f7d55;
+  border-color: #2f7d55;
+  color: #fff;
+}
+
+.cl-item--checked .cl-item-text {
+  color: #94a3b8;
+  text-decoration: line-through;
+}
+
+.cl-photo {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 16px 13px;
+  border-top: 1px dashed #e5ebf6;
+}
+
+.cl-photo.filled {
+  border-top-style: solid;
+}
+
+.cl-photo-preview {
+  width: 52px;
+  height: 52px;
+  object-fit: cover;
+  border: 1px solid #e5ebf6;
+  flex: none;
+}
+
+.cl-photo-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.cl-photo-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid #f0dcb4;
+  background: #fdf3e0;
+  color: #a86a15;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cl-photo.filled .cl-photo-btn {
+  border-color: #dbe3f0;
+  background: #fbfcff;
+  color: #475569;
+}
+
+.cl-photo-btn input[type="file"] {
+  display: none;
+}
+
+.cl-foot {
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  border-top: 1px solid #e5ebf6;
+  padding: 12px 0 4px;
+  margin-top: 8px;
+}
+
+.cl-foot-hint {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.cl-submit {
+  width: 100%;
+  margin: 0;
+  min-height: 50px;
+  font-weight: 700;
+}
+
+@media (max-width: 768px) {
+  /* Липкая кнопка не должна прятаться за нижней панелью вкладок. */
+  .cl-foot {
+    bottom: calc(env(safe-area-inset-bottom) + 68px);
+  }
+}
