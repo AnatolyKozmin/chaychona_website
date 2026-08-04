@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { api } from "../api/client";
 import { useBodyScrollLock } from "../composables/useBodyScrollLock";
+import { allergenSummary, analyzeIngredients } from "../lib/allergens";
 import { useAuthStore } from "../stores/auth";
 
 interface DishCategory {
@@ -58,19 +59,23 @@ interface DishAdminItem {
 }
 
 const auth = useAuthStore();
+/** Всё меню ресторана целиком: фильтруем и ищем на клиенте, чтобы поиск
+ *  отзывался мгновенно и не бил в API на каждую букву. */
 const dishes = ref<DishCard[]>([]);
 const categories = ref<DishCategory[]>([]);
 const publicRestaurants = ref<RestaurantItem[]>([]);
 const selectedPublicRestaurant = ref<string>("");
-const selectedCategory = ref("");
-const selectedCategoryLabel = ref(""); // для заголовка при просмотре блюд
-const showCategoriesView = ref(true); // сначала категории, потом блюда
+const selectedCategory = ref(""); // "" — все разделы
+const searchQuery = ref("");
 const loading = ref(false);
 const error = ref("");
-const currentIndex = ref(0);
+/** Индекс открытой карточки внутри visibleDishes; null — открыта сетка. */
+const openedDishIndex = ref<number | null>(null);
 const showVideo = ref(false);
 const cardOffsetX = ref(0);
 let dragStartX = 0;
+let dragStartY = 0;
+let dragAxis: "x" | "y" | null = null;
 let dragging = false;
 const adminLoading = ref(false);
 const adminError = ref("");
@@ -133,9 +138,56 @@ const dishForm = reactive({
   video_path: ""
 });
 
-const currentDish = computed(() => dishes.value[currentIndex.value] ?? null);
-const hasNext = computed(() => currentIndex.value < dishes.value.length - 1);
-const hasPrev = computed(() => currentIndex.value > 0);
+/** Нормализация под поиск: регистр и «ё» не должны мешать найти блюдо. */
+function normalize(value: string): string {
+  return value.toLowerCase().replace(/ё/g, "е");
+}
+
+const visibleDishes = computed(() => {
+  const terms = normalize(searchQuery.value).trim().split(/\s+/).filter(Boolean);
+  return dishes.value.filter((dish) => {
+    if (selectedCategory.value && dish.category?.name !== selectedCategory.value) {
+      return false;
+    }
+    if (terms.length === 0) {
+      return true;
+    }
+    // Ищем и по составу: гость спрашивает «а что с креветками?», а не название.
+    const haystack = normalize(
+      [dish.name, dish.ingredients ?? "", dish.description ?? "", dish.category?.name ?? ""].join(" ")
+    );
+    return terms.every((term) => haystack.includes(term));
+  });
+});
+
+const categoryTabs = computed(() => {
+  const counts = new Map<string, number>();
+  for (const dish of dishes.value) {
+    const name = dish.category?.name;
+    if (name) {
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+  }
+  return categories.value
+    .filter((category) => counts.has(category.name))
+    .map((category) => ({ name: category.name, count: counts.get(category.name) ?? 0 }));
+});
+
+const currentDish = computed(() =>
+  openedDishIndex.value === null ? null : visibleDishes.value[openedDishIndex.value] ?? null
+);
+const currentBreakdown = computed(() =>
+  currentDish.value
+    ? analyzeIngredients(currentDish.value.ingredients, currentDish.value.name)
+    : null
+);
+const currentAllergenSummary = computed(() =>
+  currentBreakdown.value ? allergenSummary(currentBreakdown.value) : ""
+);
+const hasNext = computed(
+  () => openedDishIndex.value !== null && openedDishIndex.value < visibleDishes.value.length - 1
+);
+const hasPrev = computed(() => openedDishIndex.value !== null && openedDishIndex.value > 0);
 const isSuperadmin = computed(() => auth.isSuperadmin);
 const restaurantTabs = computed(() => [{ id: "all", name: "Все рестораны" }, ...restaurants.value]);
 const restaurantNameById = computed(() => {
@@ -205,6 +257,31 @@ const visibleGroups = computed(() => {
   return groupedDishes.value.filter((group) => String(group.id) === selectedCategorySubmenu.value);
 });
 
+function dishWordForm(count: number): string {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  if (last === 1 && lastTwo !== 11) {
+    return "блюдо";
+  }
+  if (last >= 2 && last <= 4 && (lastTwo < 10 || lastTwo >= 20)) {
+    return "блюда";
+  }
+  return "блюд";
+}
+
+/** Пометки на плитке: острое и не больше двух аллергенов, иначе плитка не читается. */
+function dishTags(dish: DishCard): Array<{ label: string; hot: boolean }> {
+  const breakdown = analyzeIngredients(dish.ingredients, dish.name);
+  const tags: Array<{ label: string; hot: boolean }> = [];
+  if (breakdown.isHot) {
+    tags.push({ label: "остро", hot: true });
+  }
+  for (const allergen of breakdown.allergens.slice(0, breakdown.isHot ? 1 : 2)) {
+    tags.push({ label: allergen, hot: false });
+  }
+  return tags;
+}
+
 function toMediaUrl(path: string | null): string | null {
   if (!path) {
     return null;
@@ -234,10 +311,11 @@ function selectPublicRestaurant(restaurantId: string) {
     return;
   }
   selectedPublicRestaurant.value = restaurantId;
-  showCategoriesView.value = true;
   selectedCategory.value = "";
-  selectedCategoryLabel.value = "";
+  searchQuery.value = "";
+  openedDishIndex.value = null;
   void loadCategories();
+  void loadDishes();
 }
 
 async function loadCategories() {
@@ -251,19 +329,35 @@ async function loadCategories() {
   }
 }
 
+const FEED_PAGE_SIZE = 100; // потолок limit на бэкенде
+const FEED_MAX_PAGES = 20; // страховка от бесконечного цикла
+
+/**
+ * Тянет всё меню ресторана разом. Официант в зале ищет конкретное блюдо, и
+ * запрос на сервер под каждую букву поиска был бы и медленнее, и бесполезнее:
+ * меню целиком — это сотни записей, они спокойно живут в памяти и фильтруются
+ * мгновенно.
+ */
 async function loadDishes() {
   loading.value = true;
   error.value = "";
   try {
-    const { data } = await api.get<{ total: number; items: DishCard[] }>("/menu/feed", {
-      params: {
-        limit: 100,
-        category: selectedCategory.value || undefined,
-        restaurant_id: selectedPublicRestaurant.value || undefined
+    const collected: DishCard[] = [];
+    for (let page = 0; page < FEED_MAX_PAGES; page += 1) {
+      const { data } = await api.get<{ total: number; items: DishCard[] }>("/menu/feed", {
+        params: {
+          limit: FEED_PAGE_SIZE,
+          offset: page * FEED_PAGE_SIZE,
+          restaurant_id: selectedPublicRestaurant.value || undefined
+        }
+      });
+      collected.push(...data.items);
+      if (data.items.length < FEED_PAGE_SIZE || collected.length >= data.total) {
+        break;
       }
-    });
-    dishes.value = data.items;
-    currentIndex.value = 0;
+    }
+    dishes.value = collected;
+    openedDishIndex.value = null;
     showVideo.value = false;
   } catch (e: any) {
     const detail = e?.response?.data?.detail;
@@ -658,19 +752,19 @@ async function deleteDish(dishId: number) {
   }
 }
 
-async function selectCategory(categoryName: string, categoryLabel: string) {
+function selectCategory(categoryName: string) {
   selectedCategory.value = categoryName;
-  selectedCategoryLabel.value = categoryLabel;
-  showCategoriesView.value = false;
-  await loadDishes();
+  openedDishIndex.value = null;
 }
 
-function goBackToCategories() {
-  showCategoriesView.value = true;
-  selectedCategory.value = "";
-  selectedCategoryLabel.value = "";
-  dishes.value = [];
-  currentIndex.value = 0;
+function openDish(index: number) {
+  openedDishIndex.value = index;
+  showVideo.value = false;
+}
+
+function closeDish() {
+  openedDishIndex.value = null;
+  showVideo.value = false;
 }
 
 function setRestaurantTab(tabId: string) {
@@ -704,49 +798,77 @@ function getRestaurantName(restaurantId: string | null): string {
 }
 
 function goNext() {
-  if (!hasNext.value) {
+  if (!hasNext.value || openedDishIndex.value === null) {
     return;
   }
-  currentIndex.value += 1;
+  openedDishIndex.value += 1;
   showVideo.value = false;
 }
 
 function goPrev() {
-  if (!hasPrev.value) {
+  if (!hasPrev.value || openedDishIndex.value === null) {
     return;
   }
-  currentIndex.value -= 1;
+  openedDishIndex.value -= 1;
   showVideo.value = false;
 }
 
+/*
+ * Свайп между блюдами. Три вещи, без которых жест на телефоне разваливается:
+ * захват указателя (палец постоянно уходит за границы карточки), блокировка
+ * оси (иначе диагональное движение при скролле засчитывается как листание) и
+ * отсутствие обработчика на pointerleave, который обрывал жест на полпути.
+ */
+const SWIPE_THRESHOLD_PX = 60;
+const AXIS_LOCK_PX = 10;
+
 function onPointerDown(event: PointerEvent) {
   dragging = true;
+  dragAxis = null;
   dragStartX = event.clientX;
+  dragStartY = event.clientY;
+  (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
 }
 
 function onPointerMove(event: PointerEvent) {
   if (!dragging) {
     return;
   }
-  cardOffsetX.value = event.clientX - dragStartX;
+  const deltaX = event.clientX - dragStartX;
+  const deltaY = event.clientY - dragStartY;
+  if (dragAxis === null && Math.abs(deltaX) + Math.abs(deltaY) > AXIS_LOCK_PX) {
+    dragAxis = Math.abs(deltaX) > Math.abs(deltaY) ? "x" : "y";
+  }
+  if (dragAxis === "x") {
+    cardOffsetX.value = deltaX;
+  }
 }
 
-function onPointerUp() {
+function onPointerUp(event: PointerEvent) {
   if (!dragging) {
     return;
   }
-  const threshold = 90;
-  if (cardOffsetX.value <= -threshold) {
-    goNext();
-  } else if (cardOffsetX.value >= threshold) {
-    goPrev();
+  dragging = false;
+  const deltaX = event.clientX - dragStartX;
+  if (dragAxis === "x" && Math.abs(deltaX) > SWIPE_THRESHOLD_PX) {
+    if (deltaX < 0) {
+      goNext();
+    } else {
+      goPrev();
+    }
   }
   cardOffsetX.value = 0;
+  dragAxis = null;
+}
+
+function onPointerCancel() {
   dragging = false;
+  dragAxis = null;
+  cardOffsetX.value = 0;
 }
 
 onMounted(() => {
-  void loadPublicRestaurants().then(() => loadCategories());
+  void loadPublicRestaurants().then(() => Promise.all([loadCategories(), loadDishes()]));
   if (isSuperadmin.value) {
     void loadRestaurants();
     void loadMenuBranches();
@@ -802,7 +924,15 @@ watch(
   }
 );
 
-useBodyScrollLock(computed(() => categoryModalOpen.value || dishModalOpen.value || branchModalOpen.value));
+useBodyScrollLock(
+  computed(
+    () =>
+      categoryModalOpen.value ||
+      dishModalOpen.value ||
+      branchModalOpen.value ||
+      openedDishIndex.value !== null
+  )
+);
 </script>
 
 <template>
@@ -823,95 +953,187 @@ useBodyScrollLock(computed(() => categoryModalOpen.value || dishModalOpen.value 
       </button>
     </div>
 
-    <!-- Экран выбора категорий -->
-    <div v-if="showCategoriesView">
-      <p class="page-desc" style="margin-bottom: 18px">Выберите категорию, чтобы просмотреть блюда</p>
-      <div class="notebook-category-grid">
-        <button
-          type="button"
-          class="notebook-category-btn"
-          @click="selectCategory('', 'Все категории')"
-        >
-          Все категории
-        </button>
-        <button
-          v-for="category in categories"
-          :key="category.id"
-          type="button"
-          class="notebook-category-btn"
-          @click="selectCategory(category.name, category.name)"
-        >
-          {{ category.name }}
-        </button>
-      </div>
-      <p v-if="categories.length === 0" class="muted">Категории пока не загружены.</p>
+    <!-- Поиск: идёт и по составу, потому что гость спрашивает про продукт,
+         а не про название блюда. -->
+    <div class="nb-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" />
+        <path d="M20 20l-3.6-3.6" />
+      </svg>
+      <input
+        v-model="searchQuery"
+        type="search"
+        placeholder="Блюдо или ингредиент…"
+        autocomplete="off"
+        aria-label="Поиск по блюдам и составу"
+      />
+      <button
+        v-if="searchQuery"
+        type="button"
+        class="nb-search-clear"
+        aria-label="Очистить поиск"
+        @click="searchQuery = ''"
+      >
+        ✕
+      </button>
     </div>
 
-    <!-- Экран блюд со свайпами -->
-    <div v-else>
-      <div class="notebook-back-row">
-        <button type="button" class="ghost notebook-back-btn" @click="goBackToCategories">
-          ← Назад
-        </button>
-        <span class="notebook-category-title">{{ selectedCategoryLabel }}</span>
-      </div>
-      <p v-if="error" class="error">{{ error }}</p>
-      <p v-if="loading">Загрузка...</p>
-      <p v-else-if="!currentDish">В этой категории пока нет блюд.</p>
+    <!-- Разделы меню -->
+    <div v-if="categoryTabs.length > 0" class="nb-cats">
+      <button
+        type="button"
+        class="nb-cat"
+        :class="{ active: selectedCategory === '' }"
+        @click="selectCategory('')"
+      >
+        Все<span class="nb-cat-n">{{ dishes.length }}</span>
+      </button>
+      <button
+        v-for="tab in categoryTabs"
+        :key="tab.name"
+        type="button"
+        class="nb-cat"
+        :class="{ active: selectedCategory === tab.name }"
+        @click="selectCategory(tab.name)"
+      >
+        {{ tab.name }}<span class="nb-cat-n">{{ tab.count }}</span>
+      </button>
+    </div>
 
-      <div
-        v-else
-        class="tinder-card"
-      :style="{ transform: `translateX(${cardOffsetX}px) rotate(${cardOffsetX / 18}deg)` }"
+    <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="loading">Загрузка...</p>
+
+    <template v-else>
+      <p class="nb-count">{{ visibleDishes.length }} {{ dishWordForm(visibleDishes.length) }}</p>
+
+      <div v-if="visibleDishes.length > 0" class="nb-grid">
+        <button
+          v-for="(dish, index) in visibleDishes"
+          :key="dish.id"
+          type="button"
+          class="nb-tile"
+          @click="openDish(index)"
+        >
+          <span class="nb-tile-media">
+            <img
+              v-if="dish.image_url"
+              :src="toMediaUrl(dish.image_url) || undefined"
+              :alt="''"
+              loading="lazy"
+              decoding="async"
+            />
+            <span v-else class="nb-tile-noimg">нет фото</span>
+            <span class="nb-tile-marks">
+              <span v-if="dish.audio_url" class="nb-mark" title="Есть озвучка">♪</span>
+              <span v-if="dish.video_url" class="nb-mark" title="Есть видео">▶</span>
+            </span>
+          </span>
+          <span class="nb-tile-body">
+            <span class="nb-tile-name">{{ dish.name }}</span>
+            <span v-if="dishTags(dish).length > 0" class="nb-tile-tags">
+              <span
+                v-for="tag in dishTags(dish)"
+                :key="tag.label"
+                class="nb-tag"
+                :class="{ hot: tag.hot }"
+              >{{ tag.label }}</span>
+            </span>
+            <span v-if="dish.category" class="nb-tile-cat">{{ dish.category.name }}</span>
+          </span>
+        </button>
+      </div>
+
+      <p v-else class="nb-empty">
+        <strong>Ничего не нашлось</strong>
+        Попробуйте часть названия или один ингредиент — например «креветки» или «камамбер».
+      </p>
+    </template>
+  </section>
+
+  <!-- Полноэкранная карточка блюда -->
+  <div v-if="currentDish" class="nb-sheet" role="dialog" aria-modal="true" :aria-label="currentDish.name">
+    <div
+      class="nb-sheet-media"
+      :class="{ 'is-video': showVideo }"
+      :style="{ transform: `translateX(${cardOffsetX / 2.6}px)` }"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
-      @pointercancel="onPointerUp"
-      @pointerleave="onPointerUp"
+      @pointercancel="onPointerCancel"
     >
-      <div class="media-box" :class="{ 'media-box-video': showVideo }">
-        <div v-if="currentDish.video_url" class="media-switch">
-          <button type="button" class="media-tab" :class="{ active: !showVideo }" @click="showVideo = false">
-            Фото
-          </button>
-          <button type="button" class="media-tab" :class="{ active: showVideo }" @click="showVideo = true">
-            Видео
-          </button>
-        </div>
-        <img
-          v-if="!showVideo && currentDish.image_url"
-          :src="toMediaUrl(currentDish.image_url) || undefined"
-          :alt="currentDish.name"
-        />
-        <video
-          v-else-if="showVideo && currentDish.video_url"
-          :src="toMediaUrl(currentDish.video_url) || undefined"
-          controls
-          playsinline
-          preload="metadata"
-        />
-        <div v-else class="media-placeholder">Медиа недоступно</div>
-      </div>
-
-      <h3>{{ currentDish.name }}</h3>
-      <p class="muted" v-if="currentDish.category">{{ currentDish.category.name }}</p>
-      <p>{{ currentDish.description || "Описание пока не заполнено." }}</p>
-      <p class="muted"><strong>Состав:</strong> {{ currentDish.ingredients || "—" }}</p>
-      <audio
-        v-if="currentDish.audio_url && !showVideo"
-        :src="toMediaUrl(currentDish.audio_url) || undefined"
-        controls
-        preload="none"
-        style="width: 100%; margin-top: 10px"
+      <img
+        v-if="!showVideo && currentDish.image_url"
+        :src="toMediaUrl(currentDish.image_url) || undefined"
+        :alt="currentDish.name"
       />
-    </div>
+      <video
+        v-else-if="showVideo && currentDish.video_url"
+        :src="toMediaUrl(currentDish.video_url) || undefined"
+        controls
+        playsinline
+        preload="metadata"
+      />
+      <div v-else class="nb-sheet-noimg">Медиа недоступно</div>
 
-      <div v-if="currentDish" class="tinder-actions">
-        <button type="button" class="ghost" :disabled="!hasPrev" @click="goPrev">Предыдущее</button>
-        <button type="button" :disabled="!hasNext" @click="goNext">Следующее</button>
+      <div class="nb-sheet-top">
+        <button type="button" class="nb-round-btn" aria-label="Назад к списку" @click="closeDish">←</button>
+        <span class="nb-counter">{{ (openedDishIndex ?? 0) + 1 }} / {{ visibleDishes.length }}</span>
+      </div>
+
+      <div v-if="currentDish.video_url" class="nb-media-switch">
+        <button type="button" :class="{ active: !showVideo }" @click="showVideo = false">Фото</button>
+        <button type="button" :class="{ active: showVideo }" @click="showVideo = true">Видео</button>
       </div>
     </div>
-  </section>
+
+    <div class="nb-sheet-body">
+      <p v-if="currentDish.category" class="nb-sheet-cat">{{ currentDish.category.name }}</p>
+      <h2 class="nb-sheet-name">{{ currentDish.name }}</h2>
+      <p v-if="currentDish.price_rubles" class="nb-sheet-price">{{ currentDish.price_rubles }}</p>
+
+      <template v-if="currentDish.description">
+        <p class="nb-label">Как рассказать гостю</p>
+        <div class="nb-pitch">
+          <p>{{ currentDish.description }}</p>
+          <audio
+            v-if="currentDish.audio_url"
+            :src="toMediaUrl(currentDish.audio_url) || undefined"
+            controls
+            preload="none"
+            class="nb-audio"
+          />
+        </div>
+      </template>
+
+      <template v-if="currentBreakdown && currentBreakdown.items.length > 0">
+        <p class="nb-label">Состав</p>
+        <div class="nb-ings">
+          <span
+            v-for="(item, index) in currentBreakdown.items"
+            :key="`${item.text}-${index}`"
+            class="nb-ing"
+            :class="{ hot: item.isHot, alrg: item.allergens.length > 0 && !item.isHot }"
+          >
+            {{ item.text }}
+            <span v-if="item.isHot" class="nb-ing-why">остро</span>
+            <span v-else-if="item.allergens.length > 0" class="nb-ing-why">
+              {{ item.allergens.join(", ") }}
+            </span>
+          </span>
+        </div>
+
+        <p v-if="currentAllergenSummary" class="nb-warn">
+          Если гость спросит: в блюде есть <strong>{{ currentAllergenSummary }}</strong>.
+          При сомнении уточните на кухне.
+        </p>
+      </template>
+
+      <div class="nb-sheet-nav">
+        <button type="button" class="ghost" :disabled="!hasPrev" @click="goPrev">Предыдущее</button>
+        <button type="button" class="ghost" :disabled="!hasNext" @click="goNext">Следующее</button>
+      </div>
+    </div>
+  </div>
 
   <section v-if="isSuperadmin" class="card">
     <h2>Заполнение вкусной тетради</h2>
