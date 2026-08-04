@@ -1,9 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Restaurant Training</title>
+    <!-- viewport-fit=cover обязателен: без него env(safe-area-inset-*) всегда 0,
+         и нижняя панель уезжает под домашнюю полоску iPhone. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Обучение персонала — Чайхона №1</title>
+    <meta name="description" content="Курсы, тесты, чек-листы смены и «Вкусная тетрадь» для сотрудников зала" />
+
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#ffffff" />
+
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+
+    <!-- Запуск с рабочего стола без адресной строки -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Обучение" />
   </head>
   <body>
     <div id="app"></div>

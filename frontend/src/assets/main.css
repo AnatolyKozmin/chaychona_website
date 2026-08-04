@@ -4,6 +4,10 @@
   line-height: 1.5;
   color: #111827;
   background: #f3f6fb;
+
+  /* Геометрия интерфейса прямоугольная. Все скругления в файле идут через этот
+     токен, поэтому вернуть их можно одним значением. */
+  --radius: 0;
 }
 
 * {
@@ -80,7 +84,7 @@ body.body-scroll-lock {
   color: #334155;
   text-decoration: none;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
@@ -107,7 +111,7 @@ body.body-scroll-lock {
   color: #334155;
   font: inherit;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: var(--radius);
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
@@ -125,7 +129,7 @@ body.body-scroll-lock {
   min-width: 140px;
   background: #fff;
   border: 1px solid #e5ebf6;
-  border-radius: 10px;
+  border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
   padding: 6px;
   z-index: 20;
@@ -134,7 +138,7 @@ body.body-scroll-lock {
 .menu-dropdown-panel a {
   display: block;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   color: #334155;
   text-decoration: none;
 }
@@ -159,7 +163,7 @@ body.body-scroll-lock {
 .card {
   background: #ffffff;
   border: 1px solid #edf1f7;
-  border-radius: 16px;
+  border-radius: var(--radius);
   padding: 24px;
   margin-bottom: 20px;
   box-shadow: 0 4px 14px rgba(17, 24, 39, 0.04);
@@ -228,7 +232,7 @@ select,
 button {
   width: 100%;
   border: 1px solid #d0d8e5;
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 11px 14px;
   font: inherit;
   font-size: 0.95rem;
@@ -319,7 +323,7 @@ button.ghost {
 table {
   width: 100%;
   border-collapse: collapse;
-  border-radius: 12px;
+  border-radius: var(--radius);
   overflow: hidden;
   background: #fff;
 }
@@ -351,7 +355,7 @@ tr:hover td {
 .tinder-card {
   margin-top: 12px;
   border: 1px solid #e6ebf3;
-  border-radius: 16px;
+  border-radius: var(--radius);
   padding: 14px;
   background: #fff;
   transition: transform 0.18s ease;
@@ -365,7 +369,7 @@ tr:hover td {
 
 .media-box {
   width: 100%;
-  border-radius: 12px;
+  border-radius: var(--radius);
   overflow: hidden;
   background: #0f172a;
   aspect-ratio: 16 / 10;
@@ -398,7 +402,7 @@ tr:hover td {
   gap: 4px;
   background: rgba(15, 23, 42, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 999px;
+  border-radius: var(--radius);
   padding: 3px;
 }
 
@@ -406,7 +410,7 @@ tr:hover td {
   width: auto;
   margin: 0;
   padding: 5px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: transparent;
   color: #e2e8f0;
   border: 0;
@@ -497,7 +501,7 @@ tr:hover td {
   max-height: 90vh;
   overflow: auto;
   background: #ffffff;
-  border-radius: 16px;
+  border-radius: var(--radius);
   border: 1px solid #e5ebf6;
   padding: 16px;
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.2);
@@ -530,7 +534,7 @@ tr:hover td {
   color: #64748b;
   border: none;
   border-bottom: 2px solid transparent;
-  border-radius: 10px 10px 0 0;
+  border-radius: var(--radius);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -557,7 +561,7 @@ tr:hover td {
   padding: 26px 16px;
   margin-bottom: 14px;
   border: 2px dashed #c4d3ef;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: #fbfdff;
   cursor: pointer;
   text-align: center;
@@ -623,7 +627,7 @@ tr:hover td {
 .warning-box {
   background: #fff8ec;
   border: 1px solid #f5d9a8;
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 12px 16px;
   margin-bottom: 14px;
   font-size: 13px;
@@ -651,7 +655,7 @@ tr:hover td {
   display: inline-flex;
   gap: 0;
   border: 1px solid #d0d8e5;
-  border-radius: 10px;
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -660,7 +664,7 @@ tr:hover td {
   margin: 0;
   padding: 8px 14px;
   border: none;
-  border-radius: 0;
+  border-radius: var(--radius);
   background: #fff;
   color: #64748b;
   font-size: 13px;
@@ -700,7 +704,7 @@ tr:hover td {
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   font-size: 13px;
   font-weight: 600;
 }
@@ -783,7 +787,7 @@ tr:hover td {
   width: 100%;
   min-height: 60px;
   resize: vertical;
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 10px 12px;
   border: 1px solid #d0d8e5;
 }
@@ -803,7 +807,7 @@ tr:hover td {
 .test-question-card {
   background: #fafbff;
   border: 1px solid #e5ebf6;
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 16px;
   margin-bottom: 14px;
 }
@@ -911,7 +915,7 @@ tr:hover td {
   text-align: left;
   padding: 14px 16px;
   border: 1px solid #e5ebf6;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: #fcfdff;
   transition: border-color 0.2s ease, background 0.2s ease;
   cursor: pointer;
@@ -937,7 +941,7 @@ tr:hover td {
   margin-left: 8px;
   padding: 2px 6px;
   background: #e2e8f0;
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: 11px;
 }
 
@@ -990,7 +994,7 @@ tr:hover td {
   color: #334155;
   text-decoration: none;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius);
 }
 
 .mobile-sidebar-nav a.router-link-active {
@@ -1018,7 +1022,7 @@ tr:hover td {
   font: inherit;
   font-size: 1rem;
   text-align: left;
-  border-radius: 10px;
+  border-radius: var(--radius);
   cursor: pointer;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
@@ -1070,7 +1074,7 @@ tr:hover td {
   gap: 8px;
   padding: 22px;
   border: 1px solid #e7edf6;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: #fbfcff;
   text-decoration: none;
   color: inherit;
@@ -1106,7 +1110,7 @@ tr:hover td {
   flex-wrap: wrap;
   padding: 18px 20px;
   background: linear-gradient(135deg, #f0f7ff 0%, #e8f0fe 100%);
-  border-radius: 14px;
+  border-radius: var(--radius);
   border: 1px solid #dce7ff;
 }
 
@@ -1148,7 +1152,7 @@ tr:hover td {
   align-items: center;
   gap: 16px;
   padding: 18px 20px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   border: 2px solid #d5e0f0;
   background: #ffffff;
   text-decoration: none;
@@ -1164,7 +1168,7 @@ tr:hover td {
 .learner-menu-icon {
   width: 52px;
   height: 52px;
-  border-radius: 13px;
+  border-radius: var(--radius);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1301,7 +1305,7 @@ tr:hover td {
 .clean-item {
   border: 1px solid #e7edf6;
   background: #fbfcff;
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 14px;
 }
 
@@ -1326,7 +1330,7 @@ tr:hover td {
   margin: 8px 0;
   padding: 12px 14px;
   border: 1px solid #e3e8f2;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: #ffffff;
   cursor: pointer;
   transition: border-color 0.2s ease, background-color 0.2s ease;
@@ -1367,7 +1371,7 @@ tr:hover td {
   width: auto;
   margin: 0;
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   border: 0;
   background: #f3f6fb;
   color: #334155;
@@ -1388,7 +1392,7 @@ tr:hover td {
   width: 100%;
   text-align: left;
   padding: 12px 0;
-  border-radius: 0;
+  border-radius: var(--radius);
   border: 0;
   background: transparent;
   box-shadow: none;
@@ -1418,7 +1422,7 @@ tr:hover td {
 .test-progress-bar {
   height: 8px;
   background: #edf2f9;
-  border-radius: 999px;
+  border-radius: var(--radius);
   overflow: hidden;
   margin-top: 6px;
 }
@@ -1432,7 +1436,7 @@ tr:hover td {
 .test-summary-card,
 .attempt-card {
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius);
   padding: 10px 0;
   background: transparent;
   box-shadow: none;
@@ -1444,7 +1448,7 @@ tr:hover td {
 .test-result-card {
   position: relative;
   padding: 16px 48px 16px 18px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   margin-top: 12px;
   border: 1px solid transparent;
   transition: box-shadow 0.2s ease;
@@ -1474,7 +1478,7 @@ tr:hover td {
   right: 14px;
   width: 28px;
   height: 28px;
-  border-radius: 50%;
+  border-radius: var(--radius);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1529,7 +1533,7 @@ tr:hover td {
 
 .tests-page .answer-option {
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius);
   background: transparent;
   box-shadow: none;
   border-bottom: 1px dashed #e6edf7;
@@ -1565,7 +1569,7 @@ tr:hover td {
 .progress-bar-wrap {
   height: 120px;
   border: 1px solid #e3e8f2;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: #f8faff;
   padding: 4px;
   display: flex;
@@ -1574,7 +1578,7 @@ tr:hover td {
 
 .progress-bar {
   width: 100%;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
 }
 
@@ -1603,7 +1607,7 @@ tr:hover td {
   justify-content: center;
   font-size: 12px;
   font-weight: 600;
-  border-radius: 999px;
+  border-radius: var(--radius);
   padding: 4px 10px;
 }
 
@@ -1638,7 +1642,7 @@ tr:hover td {
 
 .standards-course-card {
   border: 1px solid #e5ebf6;
-  border-radius: 14px;
+  border-radius: var(--radius);
   padding: 20px;
   background: #fbfcff;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -1671,7 +1675,7 @@ tr:hover td {
   font-size: 0.75rem;
   font-weight: 600;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius);
 }
 
 .standards-course-badge--done {
@@ -1695,7 +1699,7 @@ tr:hover td {
   flex: 1;
   height: 10px;
   background: #e8eef6;
-  border-radius: 999px;
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -1726,7 +1730,7 @@ tr:hover td {
 .standards-progress-fill {
   height: 100%;
   background: linear-gradient(90deg, #60a5fa 0%, #2563eb 100%);
-  border-radius: 999px;
+  border-radius: var(--radius);
   transition: width 0.3s ease;
 }
 
@@ -1802,7 +1806,7 @@ tr:hover td {
 
 .standards-subblock-img {
   width: 100%;
-  border-radius: 10px;
+  border-radius: var(--radius);
   margin-bottom: 8px;
   display: block;
 }
@@ -1872,7 +1876,7 @@ tr:hover td {
 
 .checklist-card {
   border: 1px solid #e5ebf6;
-  border-radius: 14px;
+  border-radius: var(--radius);
   padding: 20px;
   background: #fbfcff;
   cursor: pointer;
@@ -1923,7 +1927,7 @@ tr:hover td {
 
 .checklist-fill-item {
   border: 1px solid #e5ebf6;
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 16px;
   background: #fbfcff;
   transition: border-color 0.2s ease, background 0.2s ease;
@@ -1968,7 +1972,7 @@ tr:hover td {
 .checklist-fill-preview {
   width: 100%;
   max-width: 200px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   border: 1px solid #e5ebf6;
   display: block;
   margin-top: 8px;
@@ -2000,7 +2004,7 @@ tr:hover td {
   gap: 12px;
   padding: 14px 16px;
   border: 1px solid #e5ebf6;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: #fbfcff;
   cursor: pointer;
   transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
@@ -2045,7 +2049,7 @@ tr:hover td {
 
 .notebook-restaurant-tab {
   padding: 8px 16px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   border: 1px solid #dbe5f5;
   background: #f8fbff;
   color: #334155;
@@ -2073,7 +2077,7 @@ tr:hover td {
   text-align: center;
   font-weight: 600;
   font-size: 1rem;
-  border-radius: 12px;
+  border-radius: var(--radius);
   border: 1px solid #e5ebf6;
   background: #fbfcff;
   color: #1e293b;
@@ -2122,7 +2126,7 @@ tr:hover td {
 .menu-category-item {
   border: 1px solid #e5ebf6;
   background: #fbfcff;
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 10px 12px;
   display: flex;
   align-items: center;
@@ -2177,7 +2181,7 @@ tr:hover td {
 
 .filter-select {
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   border: 1px solid #dce5f5;
   background: #fcfdff;
   color: #1e293b;
@@ -2196,7 +2200,7 @@ tr:hover td {
   margin: 0;
   white-space: nowrap;
   padding: 10px 16px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   font-weight: 700;
 }
 
@@ -2213,7 +2217,7 @@ tr:hover td {
   border: 1px solid #dbe5f5;
   background: #f8fbff;
   color: #334155;
-  border-radius: 999px;
+  border-radius: var(--radius);
   padding: 4px 10px;
   font-size: 12px;
   font-weight: 600;
@@ -2244,7 +2248,7 @@ tr:hover td {
 
 .menu-group {
   border: 1px solid #e5ebf6;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: #ffffff;
   overflow: hidden;
   transition: box-shadow 0.18s ease;
@@ -2259,7 +2263,7 @@ tr:hover td {
   margin: 0;
   border: 0;
   border-bottom: 1px solid #eef2fa;
-  border-radius: 0;
+  border-radius: var(--radius);
   background: #f9fbff;
   color: #1e293b;
   display: flex;
@@ -2320,7 +2324,7 @@ tr:hover td {
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: #ef4444;
   color: #fff;
   font-size: 11px;
@@ -2361,7 +2365,7 @@ tr:hover td {
   gap: 10px;
   padding: 12px 16px;
   border: 1px solid #e5ebf6;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: #f8faff;
 }
 
@@ -2397,7 +2401,7 @@ tr:hover td {
   display: inline-flex;
   align-items: center;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: #e7edf9;
   color: #2a4a8a;
   font-size: 13px;
@@ -2518,5 +2522,58 @@ tr:hover td {
   .tests-page .actions-row {
     flex-wrap: wrap;
     align-items: flex-start;
+  }
+}
+
+/* ============================================================
+   Нижняя панель вкладок (только телефоны)
+   На десктопе навигация остаётся в шапке, здесь панель скрыта.
+   ============================================================ */
+.tabbar {
+  display: none;
+}
+
+.tabbar-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 2px calc(env(safe-area-inset-bottom) + 8px);
+  color: #94a3b8;
+  text-decoration: none;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  -webkit-tap-highlight-color: transparent;
+  /* минимальная зона под палец */
+  min-height: 52px;
+}
+
+.tabbar-item svg {
+  width: 22px;
+  height: 22px;
+}
+
+.tabbar-item.router-link-active {
+  color: #2563eb;
+}
+
+@media (max-width: 768px) {
+  .tabbar {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 50;
+    background: #fff;
+    border-top: 1px solid #e6ebf3;
+  }
+
+  /* Контент не должен уезжать под панель. */
+  .content {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 84px);
   }
 }

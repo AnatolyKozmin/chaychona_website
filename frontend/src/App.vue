@@ -183,5 +183,44 @@ onUnmounted(() => {
     <main class="content">
       <RouterView />
     </main>
+
+    <!-- Нижняя панель: до верха экрана большим пальцем не дотянуться, поэтому
+         пять основных разделов живут внизу. Остальное (Статистика, разделы
+         админа, выход) осталось в шторке под кнопкой «Меню». -->
+    <nav v-if="auth.isAuthenticated" class="tabbar" aria-label="Основные разделы">
+      <RouterLink to="/" class="tabbar-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 10.5L12 4l8 6.5V20a1 1 0 01-1 1h-4v-6H9v6H5a1 1 0 01-1-1z" />
+        </svg>
+        <span>Главная</span>
+      </RouterLink>
+      <RouterLink to="/standards" class="tabbar-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 4h11l3 3v13H5z" />
+          <path d="M8.5 11h7M8.5 15h5" />
+        </svg>
+        <span>Стандарты</span>
+      </RouterLink>
+      <RouterLink to="/my-tests" class="tabbar-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 5h9v15H6V8z" />
+          <path d="M9 12.5l2 2 4-4" />
+        </svg>
+        <span>Тесты</span>
+      </RouterLink>
+      <RouterLink to="/my-checklists" class="tabbar-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 6.5l2 2 3.5-3.5M4 15.5l2 2L9.5 14" />
+          <path d="M13 7h7M13 16h7" />
+        </svg>
+        <span>Чек-листы</span>
+      </RouterLink>
+      <RouterLink to="/tasty-notebook" class="tabbar-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M7 4h10a1 1 0 011 1v15l-6-3-6 3V5a1 1 0 011-1z" />
+        </svg>
+        <span>Тетрадь</span>
+      </RouterLink>
+    </nav>
   </div>
 </template>
