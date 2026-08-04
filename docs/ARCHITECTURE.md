@@ -112,6 +112,18 @@ Frontend: `VITE_API_BASE_URL` (build-time для прод-докера, runtime 
 - **Блюда**: `backend/scripts/import_dishes_content.py` — импорт из экспорта Telegram-бота, схема описана в `backend/docs/dishes_import_schema.md`. Запуск: `docker compose exec backend python scripts/import_dishes_content.py --export-root ... [--dry-run] --verbose`.
 - **Тесты**: импорт из `.docx` (формат — [docs/word_tests_format.md](word_tests_format.md): вопросы вида `1. текст`, варианты `A)`/`а)`, верный ответ выделен **жирным**; несколько жирных вариантов → тип `multiple`) или из Excel по шаблону `templates/tests_import_template.xlsx`. UI — раздел «Конструктор тестов» (`/tests`), backend — `tests.py` (`/parse-docx` → превью, `/import-apply` → применение; `/import-xlsx` — прямой импорт Excel).
 
+## Мобильный клиент / PWA
+
+Приложение рассчитано на официанта с телефоном: иконка на рабочем столе, работа одной рукой в зале.
+
+- PWA собрана вручную, без плагинов: манифест `frontend/public/manifest.webmanifest`, иконки `frontend/public/icons/`, service worker `frontend/public/sw.js`. Регистрируется в `frontend/src/main.ts` только в production-сборке (в dev перехватывал бы HMR). Кэшируется только своя статика (`/assets/`, `/icons/`, `index.html`); ответы API не кэшируются никогда — они персональные и ходят под JWT. При правке `sw.js` поднимать `VERSION` внутри файла, иначе старые кэши не подчистятся.
+- `frontend/nginx.conf`: `immutable` на `/assets/`, `no-cache` на `sw.js` и манифест — без этого после деплоя пользователи остаются на старой версии.
+- В `frontend/index.html` у viewport стоит `viewport-fit=cover`. Без него `env(safe-area-inset-*)` всегда 0 и нижняя панель уезжает под домашнюю полоску iPhone.
+- Нижняя панель вкладок (Главная / Стандарты / Тесты / Чек-листы / Тетрадь) живёт в `App.vue`, показывается только на ширине до 768px. Остальные разделы — в шторке под кнопкой «Меню».
+- Геометрия интерфейса прямоугольная: единый токен `--radius` в начале `frontend/src/assets/main.css`. Отдельные `border-radius` в файле не прописывать.
+- `frontend/src/lib/allergens.ts` — разбор состава блюда и разметка аллергенов по ключевым словам (орехи, кунжут, молочное, яйцо, морепродукты, рыба, глютен, мёд, горчица, соя, сельдерей + отдельно «острое»). Тесты — `frontend/src/lib/__tests__/allergens.spec.ts`. Один ингредиент может нести несколько аллергенов сразу, собираются все совпадения. Это подсказка официанту, а не гарантия: список ключевых слов должен проверять шеф-повар.
+- «Вкусная тетрадь» грузит меню ресторана целиком (страницами по 100 через `/menu/feed`) и фильтрует в памяти — поиск по названию и составу работает без запросов к API.
+
 ## Известные особенности (важно учитывать при изменениях)
 
 - Нет Alembic — миграции схемы это код в `main.py::_run_startup`, выполняется на каждом старте backend. Новая таблица `menu_dish_video_jobs` создаётся штатным `Base.metadata.create_all`.
