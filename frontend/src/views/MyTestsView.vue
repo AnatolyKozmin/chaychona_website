@@ -129,6 +129,45 @@ const filteredAttempts = computed(() => {
   });
 });
 
+/*
+ * Тест идёт по одному вопросу на экран. Раньше все вопросы висели одним
+ * списком: на телефоне это стена текста, в которой теряешь место, и вдобавок
+ * легко отправить тест, промотав мимо неотвеченного вопроса.
+ */
+const questionIndex = ref(0);
+
+const currentQuestion = computed(() => activeTest.value?.questions[questionIndex.value] ?? null);
+const questionsCount = computed(() => activeTest.value?.questions.length ?? 0);
+const isLastQuestion = computed(() => questionIndex.value >= questionsCount.value - 1);
+const currentAnswered = computed(() => {
+  const question = currentQuestion.value;
+  return question ? (answers.value[question.id] ?? []).length > 0 : false;
+});
+
+function isOptionSelected(questionId: number, optionId: number): boolean {
+  return (answers.value[questionId] ?? []).includes(optionId);
+}
+
+function chooseOption(questionId: number, optionId: number, multiple: boolean) {
+  if (multiple) {
+    toggleMultiple(questionId, optionId, !isOptionSelected(questionId, optionId));
+  } else {
+    setSingle(questionId, optionId);
+  }
+}
+
+function goNextQuestion() {
+  if (!isLastQuestion.value) {
+    questionIndex.value += 1;
+  }
+}
+
+function goPrevQuestion() {
+  if (questionIndex.value > 0) {
+    questionIndex.value -= 1;
+  }
+}
+
 function toggleMultiple(questionId: number, optionId: number, checked: boolean) {
   const current = new Set(answers.value[questionId] ?? []);
   if (checked) {
@@ -203,6 +242,7 @@ async function startTest(testId: number) {
     const { data } = await api.get<TakeTest>(`/tests/${testId}/take`);
     activeTest.value = data;
     answers.value = {};
+    questionIndex.value = 0;
     startedAt.value = new Date().toISOString();
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "Не удалось открыть тест";
@@ -238,6 +278,7 @@ function resetToList() {
   activeTest.value = null;
   result.value = null;
   answers.value = {};
+  questionIndex.value = 0;
   startedAt.value = null;
 }
 
@@ -292,54 +333,82 @@ useBodyScrollLock(computed(() => attemptsModalOpen.value));
       <p class="muted">{{ activeTest.restaurant_name }} / {{ activeTest.job_title_name }}</p>
       <p class="muted" v-if="activeTest.description">{{ activeTest.description }}</p>
       <div v-if="!result" class="test-progress">
-        <div class="muted">Прогресс: {{ totalAnswered }}/{{ activeTest.questions.length }} ({{ progressPercent }}%)</div>
+        <div class="muted">Отвечено {{ totalAnswered }} из {{ activeTest.questions.length }}</div>
         <div class="test-progress-bar">
           <div class="test-progress-fill" :style="{ width: `${progressPercent}%` }" />
         </div>
       </div>
 
-      <template v-if="!result">
-        <div v-for="(question, idx) in activeTest.questions" :key="question.id" class="test-question-card">
-          <h4 style="margin: 0 0 8px">Вопрос {{ idx + 1 }}</h4>
-          <p class="long-text" style="margin-top: 0">{{ question.text }}</p>
-          <label
-            v-for="option in question.options"
-            :key="option.id"
-            class="answer-option"
-            :class="{
-              selected:
-                question.question_type === 'multiple'
-                  ? (answers[question.id] ?? []).includes(option.id)
-                  : (answers[question.id] ?? [])[0] === option.id
-            }"
-          >
-            <span class="answer-option-text">{{ option.text }}</span>
-            <input
-              v-if="question.question_type === 'multiple'"
-              type="checkbox"
-              :checked="(answers[question.id] ?? []).includes(option.id)"
-              @change="toggleMultiple(question.id, option.id, ($event.target as HTMLInputElement).checked)"
-            />
-            <input
-              v-else
-              type="radio"
-              :name="`question-${question.id}`"
-              :checked="(answers[question.id] ?? [])[0] === option.id"
-              @change="setSingle(question.id, option.id)"
-            />
-          </label>
+      <template v-if="!result && currentQuestion">
+        <div class="quiz-card">
+          <p class="quiz-num">Вопрос {{ questionIndex + 1 }} из {{ questionsCount }}</p>
+          <p class="quiz-text long-text">{{ currentQuestion.text }}</p>
+          <p class="quiz-hint">
+            {{ currentQuestion.question_type === "multiple" ? "Можно выбрать несколько ответов" : "Один правильный ответ" }}
+          </p>
+
+          <div class="quiz-options">
+            <button
+              v-for="option in currentQuestion.options"
+              :key="option.id"
+              type="button"
+              class="quiz-option"
+              :class="{ selected: isOptionSelected(currentQuestion.id, option.id) }"
+              :aria-pressed="isOptionSelected(currentQuestion.id, option.id)"
+              @click="chooseOption(currentQuestion.id, option.id, currentQuestion.question_type === 'multiple')"
+            >
+              <span
+                class="quiz-mark"
+                :class="{ multi: currentQuestion.question_type === 'multiple' }"
+                aria-hidden="true"
+              >✓</span>
+              <span class="quiz-option-text">{{ option.text }}</span>
+            </button>
+          </div>
         </div>
-        <button type="button" :disabled="submitting" @click="submitTest">Завершить тест</button>
+
+        <div class="quiz-nav">
+          <button
+            v-if="questionIndex > 0"
+            type="button"
+            class="ghost quiz-back"
+            @click="goPrevQuestion"
+          >
+            Назад
+          </button>
+          <button
+            v-if="!isLastQuestion"
+            type="button"
+            class="quiz-next"
+            :disabled="!currentAnswered"
+            @click="goNextQuestion"
+          >
+            Дальше
+          </button>
+          <button
+            v-else
+            type="button"
+            class="quiz-next"
+            :disabled="!currentAnswered || submitting"
+            @click="submitTest"
+          >
+            {{ submitting ? "Отправка..." : "Завершить тест" }}
+          </button>
+        </div>
       </template>
 
-      <template v-else>
+      <template v-else-if="result">
         <div class="test-summary-card">
-          <h3 style="margin-top: 0">Результат</h3>
-          <p><strong>Всего вопросов:</strong> {{ result.total_questions }}</p>
-          <p><strong>Правильно:</strong> {{ result.correct_answers }}</p>
-          <p><strong>Неправильно:</strong> {{ result.incorrect_answers }}</p>
-          <p><strong>Процент:</strong> {{ scorePercent(result) }}%</p>
-          <p v-if="result.duration_seconds !== null"><strong>Время прохождения:</strong> {{ result.duration_seconds }} сек.</p>
+          <p
+            class="quiz-score"
+            :class="scorePercent(result) >= 80 ? 'good' : scorePercent(result) >= 60 ? 'mid' : 'low'"
+          >
+            {{ scorePercent(result) }}%
+          </p>
+          <p class="quiz-score-note">
+            {{ result.correct_answers }} из {{ result.total_questions }} верно
+            <template v-if="result.duration_seconds !== null"> · {{ result.duration_seconds }} сек.</template>
+          </p>
         </div>
 
         <div

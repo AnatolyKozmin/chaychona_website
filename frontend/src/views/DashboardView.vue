@@ -216,6 +216,18 @@ watch(
   <template v-else>
     <hr class="section-divider" />
     <section class="card learner-dashboard">
+    <!-- completed_percent приходит из API, но раньше нигде не показывался. -->
+    <div v-if="learnerOverview && !loading" class="learner-progress-head">
+      <span class="learner-progress-label">Обучение пройдено</span>
+      <span class="learner-progress-value">{{ Math.round(learnerOverview.completed_percent) }}%</span>
+    </div>
+    <div v-if="learnerOverview && !loading" class="learner-progress-track">
+      <div
+        class="learner-progress-fill"
+        :style="{ width: `${Math.min(100, Math.max(0, learnerOverview.completed_percent))}%` }"
+      />
+    </div>
+
     <div v-if="learnerOverview && !loading" class="learner-progress-preview">
       <div class="progress-preview-item">
         <span class="progress-preview-value">{{ learnerOverview.completed_trainings }} из {{ learnerOverview.total_trainings }}</span>

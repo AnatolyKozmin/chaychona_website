@@ -4,6 +4,8 @@ import { useRoute, useRouter } from "vue-router";
 import { api } from "../api/client";
 
 let dragStartX = 0;
+let dragStartY = 0;
+let dragAxis: "x" | "y" | null = null;
 let dragging = false;
 
 interface CourseSubBlock {
@@ -164,26 +166,53 @@ function goNext() {
   activeBlockIdx.value += 1;
 }
 
+/*
+ * Свайп между блоками. Захват указателя нужен потому, что палец постоянно
+ * уходит за границы карточки; блокировка оси — чтобы вертикальный скролл
+ * длинного текста не засчитывался как листание.
+ */
+const SWIPE_THRESHOLD_PX = 60;
+const AXIS_LOCK_PX = 10;
+
 function onPointerDown(event: PointerEvent) {
   dragging = true;
+  dragAxis = null;
   dragStartX = event.clientX;
+  dragStartY = event.clientY;
+  (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
 }
 
 function onPointerMove(event: PointerEvent) {
   if (!dragging) return;
-  cardOffsetX.value = event.clientX - dragStartX;
+  const deltaX = event.clientX - dragStartX;
+  const deltaY = event.clientY - dragStartY;
+  if (dragAxis === null && Math.abs(deltaX) + Math.abs(deltaY) > AXIS_LOCK_PX) {
+    dragAxis = Math.abs(deltaX) > Math.abs(deltaY) ? "x" : "y";
+  }
+  if (dragAxis === "x") {
+    cardOffsetX.value = deltaX;
+  }
 }
 
-function onPointerUp() {
+function onPointerUp(event: PointerEvent) {
   if (!dragging) return;
-  const threshold = 90;
-  if (cardOffsetX.value <= -threshold) {
-    if (canGoNext.value) goNext();
-  } else if (cardOffsetX.value >= threshold) {
-    if (canGoPrev.value) goPrev();
+  dragging = false;
+  const deltaX = event.clientX - dragStartX;
+  if (dragAxis === "x" && Math.abs(deltaX) > SWIPE_THRESHOLD_PX) {
+    if (deltaX < 0) {
+      goNext();
+    } else {
+      goPrev();
+    }
   }
   cardOffsetX.value = 0;
+  dragAxis = null;
+}
+
+function onPointerCancel() {
   dragging = false;
+  dragAxis = null;
+  cardOffsetX.value = 0;
 }
 
 onMounted(async () => {
@@ -220,15 +249,14 @@ onMounted(async () => {
         @pointerdown="onPointerDown"
         @pointermove="onPointerMove"
         @pointerup="onPointerUp"
-        @pointercancel="onPointerUp"
-        @pointerleave="onPointerUp"
+        @pointercancel="onPointerCancel"
       >
         <h3 class="standards-block-heading">{{ activeBlock.heading || activeProgress.title }}</h3>
         <img
           v-if="activeBlock.image_path"
           :src="toMediaUrl(activeBlock.image_path) || undefined"
-          alt="block image"
-          style="width: 100%; border-radius: 12px; margin-bottom: 10px"
+          alt=""
+          class="standards-block-img"
         />
         <p class="long-text">{{ activeBlock.text }}</p>
         <div v-for="subblock in activeBlock.subblocks" :key="subblock.id" class="standards-subblock">
@@ -242,11 +270,11 @@ onMounted(async () => {
           <p class="long-text">{{ subblock.text }}</p>
         </div>
         <div class="standards-block-actions">
-          <button type="button" class="ghost" :disabled="!canGoPrev" @click="goPrev">←</button>
+          <button type="button" class="ghost" :disabled="!canGoPrev" aria-label="Предыдущий блок" @click="goPrev">←</button>
           <button type="button" class="standards-understood-btn" :disabled="saving || activeProgress.is_completed" @click="markUnderstood">
             {{ activeProgress.is_completed ? "Изучено" : "Понял!" }}
           </button>
-          <button type="button" class="ghost" :disabled="!canGoNext" @click="goNext">→</button>
+          <button type="button" class="ghost" :disabled="!canGoNext" aria-label="Следующий блок" @click="goNext">→</button>
         </div>
       </div>
 
