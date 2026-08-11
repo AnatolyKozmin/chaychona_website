@@ -2688,12 +2688,26 @@ tr:hover td {
   gap: 12px;
 }
 
+@media (max-width: 768px) {
+  /* На телефоне колонок ровно две. auto-fill здесь не годится: при ширине
+     экрана 390px на сетку остаётся ~307px, а minmax(150px) с отступом требует
+     312px — не хватало пяти пикселей, и сетка схлопывалась в одну колонку с
+     гигантскими плитками. */
+  .nb-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+}
+
 .nb-tile {
   width: 100%;
   margin: 0;
   padding: 0;
   border: 1px solid #e5ebf6;
   background: #fff;
+  /* Базовый button красит текст в белый — на светлой карточке его надо вернуть,
+     иначе название блюда становится невидимым. */
+  color: #1e293b;
   text-align: left;
   cursor: pointer;
   display: flex;
@@ -3047,6 +3061,8 @@ tr:hover td {
   padding: 15px 16px;
   border: 1px solid #e5ebf6;
   background: #fff;
+  /* см. .nb-tile — возвращаем цвет текста после базового button */
+  color: #1e293b;
   text-align: left;
   cursor: pointer;
   display: flex;
@@ -3120,6 +3136,8 @@ tr:hover td {
   padding: 15px 16px;
   border: 0;
   background: none;
+  /* см. .nb-tile — возвращаем цвет текста после базового button */
+  color: #1e293b;
   text-align: left;
   cursor: pointer;
   display: flex;
