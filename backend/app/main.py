@@ -184,6 +184,9 @@ def _run_startup() -> None:
             )
         )
         connection.execute(text("ALTER TABLE menu_dishes ADD COLUMN IF NOT EXISTS restaurant_id UUID"))
+        # Аллергены блюда: заполняет шеф-повар вручную, через запятую.
+        # NULL/пусто = не заполнено, а не «аллергенов нет».
+        connection.execute(text("ALTER TABLE menu_dishes ADD COLUMN IF NOT EXISTS allergens VARCHAR(500)"))
         connection.execute(
             text(
                 "CREATE TABLE IF NOT EXISTS menu_branches ("

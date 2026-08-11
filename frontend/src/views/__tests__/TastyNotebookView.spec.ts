@@ -16,6 +16,7 @@ const DISHES = [
     id: 1,
     name: "Камамбер обжаренный в хрустящем миндале",
     ingredients: "Сыр камамбер, арахисовые лепестки, вишневая эспума",
+    allergens: "молочное, орехи",
     description: "Обжаренный камамбер с вишнёвым соусом.",
     price: 890,
     price_rubles: "890 ₽",
@@ -28,6 +29,7 @@ const DISHES = [
     id: 2,
     name: "Большой зеленый салат с креветками",
     ingredients: "Креветки, салатная смесь, огурец, гуакамоле из авокадо",
+    allergens: null,
     description: "Креветки, микс салатов, авокадо.",
     price: 1200,
     price_rubles: "1 200 ₽",
@@ -40,6 +42,7 @@ const DISHES = [
     id: 3,
     name: "Хрустящий сыр с чесночным соусом",
     ingredients: "Сыр моцарелла, чеснок, майонез",
+    allergens: "",
     description: "Хрустящие палочки сыра в панировке.",
     price: 640,
     price_rubles: "640 ₽",
@@ -118,7 +121,7 @@ describe("TastyNotebookView — экран официанта", () => {
     expect(wrapper.text()).toContain("Ничего не нашлось");
   });
 
-  it("открывает карточку блюда и подсвечивает аллергены в составе", async () => {
+  it("показывает аллергены только те, что заполнил шеф", async () => {
     const wrapper = await mountView();
     await wrapper.findAll(".nb-tile")[0].trigger("click");
 
@@ -127,12 +130,40 @@ describe("TastyNotebookView — экран официанта", () => {
     expect(sheet.text()).toContain("Камамбер обжаренный");
     expect(sheet.text()).toContain("Как рассказать гостю");
 
-    // «Сыр камамбер» — молочное, «арахисовые лепестки» — орехи.
     const flagged = sheet.findAll(".nb-ing.alrg").map((node) => node.text());
-    expect(flagged.some((text) => text.includes("Сыр камамбер"))).toBe(true);
-    expect(flagged.some((text) => text.includes("арахисовые лепестки"))).toBe(true);
-
+    expect(flagged).toEqual(["молочное", "орехи"]);
     expect(sheet.find(".nb-warn").text()).toContain("молочное, орехи");
+  });
+
+  it("не показывает блок аллергенов, когда поле не заполнено", async () => {
+    const wrapper = await mountView();
+    // Во втором блюде состав есть, а аллергены не заполнены (null).
+    await wrapper.findAll(".nb-tile")[1].trigger("click");
+
+    const sheet = wrapper.find(".nb-sheet");
+    expect(sheet.text()).toContain("Большой зеленый салат");
+    expect(sheet.find(".nb-warn").exists()).toBe(false);
+    expect(sheet.findAll(".nb-ing.alrg")).toHaveLength(0);
+    expect(sheet.text()).not.toContain("Аллергены");
+    // Состав при этом на месте.
+    expect(sheet.text()).toContain("Состав");
+    expect(sheet.findAll(".nb-ing").length).toBeGreaterThan(0);
+  });
+
+  it("пустая строка аллергенов тоже считается незаполненной", async () => {
+    const wrapper = await mountView();
+    await wrapper.findAll(".nb-tile")[2].trigger("click");
+    expect(wrapper.find(".nb-sheet .nb-warn").exists()).toBe(false);
+  });
+
+  it("метки на плитке берёт из заполненного поля, а не из состава", async () => {
+    const wrapper = await mountView();
+    const tiles = wrapper.findAll(".nb-tile");
+
+    expect(tiles[0].findAll(".nb-tag").map((n) => n.text())).toEqual(["молочное", "орехи"]);
+    // У салата с креветками аллергены не заполнены — меток быть не должно,
+    // хотя по составу их можно было бы угадать.
+    expect(tiles[1].findAll(".nb-tag")).toHaveLength(0);
   });
 
   it("листает блюда внутри текущего отбора и показывает позицию", async () => {

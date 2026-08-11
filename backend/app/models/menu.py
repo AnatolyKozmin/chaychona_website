@@ -48,6 +48,10 @@ class MenuDish(Base):
     source_dish_key: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     ingredients: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Аллергены заполняет шеф-повар вручную, через запятую («орехи, молочное»).
+    # Пусто — значит не заполнено, и официанту ничего не показываем: пустое поле
+    # не должно читаться как «аллергенов нет».
+    allergens: Mapped[str | None] = mapped_column(String(500), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     price: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     price_rubles: Mapped[str | None] = mapped_column(String(32), nullable=True)

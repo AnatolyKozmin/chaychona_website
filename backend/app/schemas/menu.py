@@ -42,6 +42,8 @@ class MenuDishCard(BaseModel):
     id: int
     name: str
     ingredients: str | None
+    # Пусто = шеф ещё не заполнил. Официанту в этом случае блок не показываем.
+    allergens: str | None
     description: str | None
     price: int
     price_rubles: str | None
@@ -55,6 +57,7 @@ class MenuDishAdminPublic(BaseModel):
     id: int
     name: str
     ingredients: str | None
+    allergens: str | None
     description: str | None
     price: int
     price_rubles: str | None
@@ -73,6 +76,7 @@ class MenuDishAdminPublic(BaseModel):
 class MenuDishCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     ingredients: str | None = Field(default=None, max_length=10000)
+    allergens: str | None = Field(default=None, max_length=500)
     description: str | None = Field(default=None, max_length=10000)
     price: int = Field(default=0, ge=0)
     price_rubles: str | None = Field(default=None, max_length=32)

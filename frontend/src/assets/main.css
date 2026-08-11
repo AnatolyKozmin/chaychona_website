@@ -3451,3 +3451,28 @@ tr:hover td {
     min-height: 68px;
   }
 }
+
+/* Подсказка по аллергенам в форме блюда (админка) */
+.dish-allergen-help {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.dish-allergen-help p {
+  margin: 0;
+  flex: 1;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.dish-allergen-help button {
+  flex: none;
+  margin: 0;
+}
+
+.dish-allergen-hint {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+}

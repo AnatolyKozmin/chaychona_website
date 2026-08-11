@@ -105,6 +105,7 @@ def _build_dish_admin_public(db: Session, dish: MenuDish) -> MenuDishAdminPublic
         id=dish.id,
         name=dish.name,
         ingredients=dish.ingredients,
+        allergens=dish.allergens,
         description=dish.description,
         price=dish.price,
         price_rubles=dish.price_rubles,
@@ -207,6 +208,7 @@ def get_menu_feed(
                 id=dish.id,
                 name=dish.name,
                 ingredients=dish.ingredients,
+                allergens=dish.allergens,
                 description=dish.description,
                 price=dish.price,
                 price_rubles=dish.price_rubles,
@@ -439,6 +441,7 @@ def create_dish_admin(
     dish = MenuDish(
         name=payload.name.strip(),
         ingredients=payload.ingredients.strip() if payload.ingredients else None,
+        allergens=payload.allergens.strip() if payload.allergens else None,
         description=payload.description.strip() if payload.description else None,
         price=payload.price,
         price_rubles=payload.price_rubles.strip() if payload.price_rubles else None,
@@ -487,6 +490,7 @@ def update_dish_admin(
 
     dish.name = payload.name.strip()
     dish.ingredients = payload.ingredients.strip() if payload.ingredients else None
+    dish.allergens = payload.allergens.strip() if payload.allergens else None
     dish.description = payload.description.strip() if payload.description else None
     dish.price = payload.price
     dish.price_rubles = payload.price_rubles.strip() if payload.price_rubles else None

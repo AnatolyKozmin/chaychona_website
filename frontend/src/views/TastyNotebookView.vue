@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { api } from "../api/client";
 import { useBodyScrollLock } from "../composables/useBodyScrollLock";
-import { allergenSummary, analyzeIngredients } from "../lib/allergens";
+import { analyzeIngredients, splitIngredients } from "../lib/allergens";
 import { useAuthStore } from "../stores/auth";
 
 interface DishCategory {
@@ -26,6 +26,8 @@ interface DishCard {
   id: number;
   name: string;
   ingredients: string | null;
+  /** Заполняет шеф-повар. Пусто — значит не заполнено, блок не показываем. */
+  allergens: string | null;
   description: string | null;
   price: number;
   price_rubles: string | null;
@@ -44,6 +46,7 @@ interface DishAdminItem {
   id: number;
   name: string;
   ingredients: string | null;
+  allergens: string | null;
   description: string | null;
   price: number;
   price_rubles: string | null;
@@ -125,6 +128,7 @@ const branchForm = reactive({
 const dishForm = reactive({
   name: "",
   ingredients: "",
+  allergens: "",
   description: "",
   price: 0,
   price_rubles: "",
@@ -176,14 +180,8 @@ const categoryTabs = computed(() => {
 const currentDish = computed(() =>
   openedDishIndex.value === null ? null : visibleDishes.value[openedDishIndex.value] ?? null
 );
-const currentBreakdown = computed(() =>
-  currentDish.value
-    ? analyzeIngredients(currentDish.value.ingredients, currentDish.value.name)
-    : null
-);
-const currentAllergenSummary = computed(() =>
-  currentBreakdown.value ? allergenSummary(currentBreakdown.value) : ""
-);
+const currentIngredients = computed(() => splitIngredients(currentDish.value?.ingredients));
+const currentAllergens = computed(() => parseAllergens(currentDish.value?.allergens));
 const hasNext = computed(
   () => openedDishIndex.value !== null && openedDishIndex.value < visibleDishes.value.length - 1
 );
@@ -269,17 +267,49 @@ function dishWordForm(count: number): string {
   return "блюд";
 }
 
-/** Пометки на плитке: острое и не больше двух аллергенов, иначе плитка не читается. */
-function dishTags(dish: DishCard): Array<{ label: string; hot: boolean }> {
-  const breakdown = analyzeIngredients(dish.ingredients, dish.name);
-  const tags: Array<{ label: string; hot: boolean }> = [];
-  if (breakdown.isHot) {
-    tags.push({ label: "остро", hot: true });
+const allergenHint = ref("");
+
+/**
+ * Черновик по составу: подставляет найденные по ключевым словам аллергены,
+ * чтобы шефу не набирать список с нуля. Это именно подсказка — результат
+ * попадает в обычное поле, и шеф правит его до сохранения.
+ */
+function suggestAllergens() {
+  const found = analyzeIngredients(dishForm.ingredients, dishForm.name);
+  const suggested = found.isHot ? ["острое", ...found.allergens] : [...found.allergens];
+  if (suggested.length === 0) {
+    allergenHint.value = "По составу ничего не нашлось — проверьте вручную.";
+    return;
   }
-  for (const allergen of breakdown.allergens.slice(0, breakdown.isHot ? 1 : 2)) {
-    tags.push({ label: allergen, hot: false });
+  const existing = parseAllergens(dishForm.allergens);
+  const merged = [...existing];
+  for (const item of suggested) {
+    if (!merged.includes(item)) {
+      merged.push(item);
+    }
   }
-  return tags;
+  dishForm.allergens = merged.join(", ");
+  allergenHint.value = "Подставлено по ключевым словам — проверьте и поправьте.";
+}
+
+/**
+ * Аллергены блюда — то, что вручную заполнил шеф-повар, через запятую.
+ * Пустая строка означает «не заполнено», а не «аллергенов нет», поэтому
+ * официанту в этом случае вообще ничего не показываем.
+ */
+function parseAllergens(raw: string | null | undefined): string[] {
+  if (!raw) {
+    return [];
+  }
+  return raw
+    .split(",")
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+/** Пометки на плитке: не больше двух, иначе плитка перестаёт читаться. */
+function dishTags(dish: DishCard): string[] {
+  return parseAllergens(dish.allergens).slice(0, 2);
 }
 
 function toMediaUrl(path: string | null): string | null {
@@ -422,6 +452,7 @@ function resetDishForm() {
   editingDishId.value = null;
   dishForm.name = "";
   dishForm.ingredients = "";
+  dishForm.allergens = "";
   dishForm.description = "";
   dishForm.price = 0;
   dishForm.price_rubles = "";
@@ -486,6 +517,7 @@ function startEditDish(dish: DishAdminItem) {
   editingDishId.value = dish.id;
   dishForm.name = dish.name;
   dishForm.ingredients = dish.ingredients || "";
+  dishForm.allergens = dish.allergens || "";
   dishForm.description = dish.description || "";
   dishForm.price = dish.price;
   dishForm.price_rubles = dish.price_rubles || "";
@@ -691,6 +723,7 @@ async function saveDish() {
     const payload = {
       name: dishForm.name,
       ingredients: dishForm.ingredients || null,
+      allergens: dishForm.allergens || null,
       description: dishForm.description || null,
       price: Number(dishForm.price) || 0,
       price_rubles: dishForm.price_rubles || null,
@@ -1031,12 +1064,7 @@ useBodyScrollLock(
           <span class="nb-tile-body">
             <span class="nb-tile-name">{{ dish.name }}</span>
             <span v-if="dishTags(dish).length > 0" class="nb-tile-tags">
-              <span
-                v-for="tag in dishTags(dish)"
-                :key="tag.label"
-                class="nb-tag"
-                :class="{ hot: tag.hot }"
-              >{{ tag.label }}</span>
+              <span v-for="tag in dishTags(dish)" :key="tag" class="nb-tag">{{ tag }}</span>
             </span>
             <span v-if="dish.category" class="nb-tile-cat">{{ dish.category.name }}</span>
           </span>
@@ -1105,27 +1133,28 @@ useBodyScrollLock(
         </div>
       </template>
 
-      <template v-if="currentBreakdown && currentBreakdown.items.length > 0">
+      <!-- Аллергены показываем, только если их заполнил шеф-повар. Пустое поле
+           не значит «аллергенов нет», поэтому блока просто не будет. -->
+      <template v-if="currentAllergens.length > 0">
+        <p class="nb-label">Аллергены</p>
+        <div class="nb-ings">
+          <span v-for="tag in currentAllergens" :key="tag" class="nb-ing alrg">{{ tag }}</span>
+        </div>
+        <p class="nb-warn">
+          Если гость спросит: в блюде есть <strong>{{ currentAllergens.join(", ") }}</strong>.
+          При сомнении уточните на кухне.
+        </p>
+      </template>
+
+      <template v-if="currentIngredients.length > 0">
         <p class="nb-label">Состав</p>
         <div class="nb-ings">
           <span
-            v-for="(item, index) in currentBreakdown.items"
-            :key="`${item.text}-${index}`"
+            v-for="(item, index) in currentIngredients"
+            :key="`${item}-${index}`"
             class="nb-ing"
-            :class="{ hot: item.isHot, alrg: item.allergens.length > 0 && !item.isHot }"
-          >
-            {{ item.text }}
-            <span v-if="item.isHot" class="nb-ing-why">остро</span>
-            <span v-else-if="item.allergens.length > 0" class="nb-ing-why">
-              {{ item.allergens.join(", ") }}
-            </span>
-          </span>
+          >{{ item }}</span>
         </div>
-
-        <p v-if="currentAllergenSummary" class="nb-warn">
-          Если гость спросит: в блюде есть <strong>{{ currentAllergenSummary }}</strong>.
-          При сомнении уточните на кухне.
-        </p>
       </template>
 
       <div class="nb-sheet-nav">
@@ -1328,6 +1357,25 @@ useBodyScrollLock(
         <input v-model="dishForm.description" />
         <label>Состав</label>
         <input v-model="dishForm.ingredients" />
+
+        <label>Аллергены</label>
+        <input v-model="dishForm.allergens" placeholder="через запятую: орехи, молочное" />
+        <div class="dish-allergen-help">
+          <p class="muted">
+            Пусто — официанту блок аллергенов не показывается. Пустое поле не читается
+            как «аллергенов нет», поэтому заполнять должен шеф-повар.
+          </p>
+          <button
+            type="button"
+            class="ghost"
+            :disabled="!dishForm.ingredients"
+            @click="suggestAllergens"
+          >
+            Подсказать по составу
+          </button>
+        </div>
+        <p v-if="allergenHint" class="muted dish-allergen-hint">{{ allergenHint }}</p>
+
         <div class="actions-row">
           <div style="flex: 1">
             <label>Цена (число)</label>
