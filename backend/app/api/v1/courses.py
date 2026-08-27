@@ -1,29 +1,48 @@
+from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.db.session import get_db
-from app.models.course import Course, CourseAssignment, CourseBlock, CourseBlockProgress, CourseSubBlock
+from app.models.course import (
+    Course,
+    CourseAssignment,
+    CourseBlock,
+    CourseBlockProgress,
+    CourseBlockSlide,
+    CourseSubBlock,
+)
 from app.models.quiz import QuizAttempt, QuizTest
 from app.models.user import JobTitleCatalog, RestaurantCatalog, Role, User
 from app.schemas.course import (
     CourseAssignmentPublic,
     CourseBlockPublic,
+    CourseBlockSlidePublic,
     CourseCreate,
     CourseLearnerBlockProgressPublic,
     CourseLearnerLinkedTestStatsPublic,
     CourseLearnerOverviewPublic,
     CourseLearnerStudyPublic,
     CourseLinkedTestPublic,
+    CoursePresentationSlidePublic,
+    CoursePresentationUploadResult,
     CoursePublic,
     CourseSubBlockPublic,
 )
+from app.services.presentation import PresentationError, render_pdf
 
 router = APIRouter(prefix="/courses", tags=["courses"])
+
+# Виды блока стандарта: обычный текст и колода слайдов презентации.
+BLOCK_KINDS = ("text", "deck")
+
+# Презентация тяжелее картинки, но 60 МБ — уже почти всегда скан или видео
+# внутри слайдов, а не материал для чтения с телефона.
+MAX_PRESENTATION_SIZE_BYTES = 60 * 1024 * 1024
 
 
 def _media_url(path: str | None) -> str | None:
@@ -143,6 +162,13 @@ def _build_course_public(db: Session, course: Course) -> CoursePublic:
                 select(CourseSubBlock).where(CourseSubBlock.block_id == block.id).order_by(CourseSubBlock.sort_order.asc())
             ).all()
         )
+        slides = list(
+            db.scalars(
+                select(CourseBlockSlide)
+                .where(CourseBlockSlide.block_id == block.id)
+                .order_by(CourseBlockSlide.sort_order.asc())
+            ).all()
+        )
         blocks_public.append(
             CourseBlockPublic(
                 id=block.id,
@@ -151,6 +177,18 @@ def _build_course_public(db: Session, course: Course) -> CoursePublic:
                 image_path=block.image_path,
                 image_url=_media_url(block.image_path),
                 sort_order=block.sort_order,
+                kind=block.kind or "text",
+                slides=[
+                    CourseBlockSlidePublic(
+                        id=slide.id,
+                        image_path=slide.image_path,
+                        image_url=_media_url(slide.image_path),
+                        width=slide.width,
+                        height=slide.height,
+                        sort_order=slide.sort_order,
+                    )
+                    for slide in slides
+                ],
                 subblocks=[
                     CourseSubBlockPublic(
                         id=sub.id,
@@ -318,6 +356,16 @@ def _build_blocks_progress(
     return blocks_progress, completed, total, percent
 
 
+def _normalize_block_kind(value: str | None) -> str:
+    kind = (value or "text").strip().lower()
+    if kind not in BLOCK_KINDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Неизвестный вид блока «{value}». Допустимо: {', '.join(BLOCK_KINDS)}",
+        )
+    return kind
+
+
 def _replace_blocks(db: Session, course_id: int, blocks_data):
     if not blocks_data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Добавьте хотя бы один блок")
@@ -327,19 +375,47 @@ def _replace_blocks(db: Session, course_id: int, blocks_data):
         # без чистки FK не даст удалить блоки.
         db.execute(delete(CourseBlockProgress).where(CourseBlockProgress.course_id == course_id))
         db.execute(delete(CourseSubBlock).where(CourseSubBlock.block_id.in_(block_ids)))
+        db.execute(delete(CourseBlockSlide).where(CourseBlockSlide.block_id.in_(block_ids)))
     db.execute(delete(CourseBlock).where(CourseBlock.course_id == course_id))
     db.flush()
     for idx, block in enumerate(blocks_data):
         subblocks_data = getattr(block, "subblocks", None) or []
+        kind = _normalize_block_kind(getattr(block, "kind", None))
+        slides_data = getattr(block, "slides", None) or []
+        if kind == "deck":
+            # Колода без слайдов — пустой экран у сотрудника: показать нечего,
+            # а «Понял!» всё равно потребуется нажать.
+            if not slides_data:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Блок {idx + 1}: залейте презентацию — без слайдов блок пустой",
+                )
+            # Текст у колоды необязателен: содержимое на слайдах.
+            block_text = _normalize_optional_text(getattr(block, "text", None)) or ""
+        else:
+            block_text = _normalize_required_text(getattr(block, "text", None), "text")
+            slides_data = []
         db_block = CourseBlock(
             course_id=course_id,
             heading=_normalize_optional_text(getattr(block, "heading", None)),
-            text=_normalize_required_text(getattr(block, "text", None), "text"),
+            text=block_text,
             image_path=_normalize_optional_text(getattr(block, "image_path", None)),
             sort_order=block.sort_order if block.sort_order is not None else idx,
+            kind=kind,
         )
         db.add(db_block)
         db.flush([db_block])
+        for slide_idx, slide in enumerate(slides_data):
+            image_path = _normalize_required_text(getattr(slide, "image_path", None), "slide.image_path")
+            db.add(
+                CourseBlockSlide(
+                    block_id=db_block.id,
+                    image_path=image_path,
+                    width=max(0, int(getattr(slide, "width", 0) or 0)),
+                    height=max(0, int(getattr(slide, "height", 0) or 0)),
+                    sort_order=slide.sort_order if slide.sort_order is not None else slide_idx,
+                )
+            )
         for sub_idx, sub in enumerate(subblocks_data):
             db.add(
                 CourseSubBlock(
@@ -447,9 +523,56 @@ def delete_course_admin(
         subblocks = list(db.scalars(select(CourseSubBlock).where(CourseSubBlock.block_id == block.id)).all())
         for subblock in subblocks:
             db.delete(subblock)
+        db.execute(delete(CourseBlockSlide).where(CourseBlockSlide.block_id == block.id))
         db.delete(block)
     db.delete(course)
     db.commit()
+
+
+@router.post(
+    "/admin/presentation",
+    response_model=CoursePresentationUploadResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_course_presentation(
+    file: UploadFile = File(...),
+    _: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN)),
+):
+    """Нарезать залитый PDF на слайды и вернуть их пути.
+
+    К стандарту слайды ещё не привязаны: админ видит их в форме и сохраняет
+    вместе с остальным курсом. Так залив можно отменить, не оставив в базе
+    полупустой блок, и порядок сохранения совпадает с обычными картинками.
+    """
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix != ".pdf":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Презентацию нужно залить в PDF. В PowerPoint: «Файл» → «Сохранить как» → PDF.",
+        )
+    content = await file.read()
+    if len(content) > MAX_PRESENTATION_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Файл презентации слишком большой (максимум 60 МБ)",
+        )
+    try:
+        slides = render_pdf(content)
+    except PresentationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return CoursePresentationUploadResult(
+        slides=[
+            CoursePresentationSlidePublic(
+                image_path=slide.image_path,
+                image_url=_media_url(slide.image_path),
+                width=slide.width,
+                height=slide.height,
+                sort_order=slide.sort_order,
+            )
+            for slide in slides
+        ]
+    )
 
 
 @router.get("/my", response_model=list[CoursePublic])

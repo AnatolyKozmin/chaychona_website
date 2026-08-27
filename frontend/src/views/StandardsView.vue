@@ -5,6 +5,15 @@ import { api } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 import AssignmentPicker from "../components/AssignmentPicker.vue";
 
+interface CourseBlockSlide {
+  id: number;
+  image_path: string;
+  image_url: string | null;
+  width: number;
+  height: number;
+  sort_order: number;
+}
+
 interface CourseBlock {
   id: number;
   heading: string | null;
@@ -12,7 +21,27 @@ interface CourseBlock {
   image_path: string | null;
   image_url: string | null;
   sort_order: number;
+  kind: string;
+  slides: CourseBlockSlide[];
   subblocks: CourseSubBlock[];
+}
+
+/** Слайд в форме: id ещё нет, он появится после сохранения курса. */
+interface FormSlide {
+  image_path: string;
+  width: number;
+  height: number;
+  sort_order: number;
+}
+
+interface FormBlock {
+  heading: string;
+  text: string;
+  image_path: string;
+  sort_order: number;
+  kind: "text" | "deck";
+  slides: FormSlide[];
+  subblocks: Array<{ heading: string; text: string; image_path: string; sort_order: number }>;
 }
 
 interface CourseSubBlock {
@@ -105,13 +134,21 @@ const tests = ref<TestShort[]>([]);
 
 const adminAllowed = computed(() => auth.isAdmin || auth.isSuperadmin);
 
+// Слайды режутся на сервере не мгновенно: на колоду в полсотни страниц уходят
+// секунды, и без явного «идёт нарезка» админ жмёт кнопку повторно.
+const uploadingDeckIdx = ref<number | null>(null);
+
+function emptyBlock(sortOrder: number): FormBlock {
+  return { heading: "", text: "", image_path: "", sort_order: sortOrder, kind: "text", slides: [], subblocks: [] };
+}
+
 const form = reactive({
   title: "",
   description: "",
   assignments: [] as Array<{ restaurant_id: string; job_title_id: string }>,
   linked_test_id: "",
   is_active: true,
-  blocks: [{ heading: "", text: "", image_path: "", sort_order: 0, subblocks: [] as Array<{ heading: string; text: string; image_path: string; sort_order: number }> }]
+  blocks: [emptyBlock(0)] as FormBlock[]
 });
 
 function toMediaUrl(path: string | null): string | null {
@@ -181,11 +218,46 @@ function resetForm() {
   form.assignments = [];
   form.linked_test_id = "";
   form.is_active = true;
-  form.blocks = [{ heading: "", text: "", image_path: "", sort_order: 0, subblocks: [] }];
+  form.blocks = [emptyBlock(0)];
 }
 
 function addBlock() {
-  form.blocks.push({ heading: "", text: "", image_path: "", sort_order: form.blocks.length, subblocks: [] });
+  form.blocks.push(emptyBlock(form.blocks.length));
+}
+
+async function uploadPresentation(index: number, event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+  uploadingDeckIdx.value = index;
+  error.value = "";
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    // Сервер режет PDF на картинки и отдаёт их пути; к стандарту они привяжутся
+    // только при сохранении формы — залив можно отменить, ничего не сломав.
+    const { data } = await api.post<{ slides: FormSlide[] }>("/courses/admin/presentation", fd);
+    form.blocks[index].kind = "deck";
+    form.blocks[index].slides = data.slides.map((slide, idx) => ({
+      image_path: slide.image_path,
+      width: slide.width,
+      height: slide.height,
+      sort_order: idx
+    }));
+  } catch (e: any) {
+    error.value = extractError(e, "Не удалось разобрать презентацию");
+  } finally {
+    uploadingDeckIdx.value = null;
+    target.value = "";
+  }
+}
+
+function removeSlide(blockIndex: number, slideIndex: number) {
+  const slides = form.blocks[blockIndex].slides;
+  slides.splice(slideIndex, 1);
+  slides.forEach((slide, idx) => {
+    slide.sort_order = idx;
+  });
 }
 
 function removeBlock(index: number) {
@@ -266,6 +338,15 @@ function editCourse(course: Course) {
     text: block.text,
     image_path: block.image_path || "",
     sort_order: block.sort_order,
+    kind: block.kind === "deck" ? "deck" : "text",
+    // Слайды обязаны вернуться в форму: сохранение пересоздаёт блоки целиком,
+    // и то, что не отправлено обратно, из стандарта пропадёт.
+    slides: block.slides.map((slide, idx) => ({
+      image_path: slide.image_path,
+      width: slide.width,
+      height: slide.height,
+      sort_order: idx
+    })),
     subblocks: block.subblocks.map((sub) => ({
       heading: sub.heading || "",
       text: sub.text,
@@ -295,6 +376,15 @@ async function saveCourse() {
         text: block.text,
         image_path: block.image_path || null,
         sort_order: idx,
+        kind: block.kind,
+        slides: block.kind === "deck"
+          ? block.slides.map((slide, slideIdx) => ({
+              image_path: slide.image_path,
+              width: slide.width,
+              height: slide.height,
+              sort_order: slideIdx
+            }))
+          : [],
         subblocks: block.subblocks.map((sub, subIdx) => ({
           heading: sub.heading || null,
           text: sub.text,
@@ -438,14 +528,56 @@ watch(
           </div>
           <label>Заголовок блока</label>
           <input v-model="block.heading" />
-          <label>Текст блока</label>
-          <textarea v-model="block.text" rows="5" required style="width: 100%; border: 1px solid #d0d8e5; border-radius: 10px; padding: 10px 12px;" />
-          <label>Картинка блока (опционально)</label>
-          <div class="actions-row">
-            <input v-model="block.image_path" placeholder="uploads/..." />
-            <input type="file" accept="image/*" @change="uploadBlockImage(index, $event)" />
-          </div>
-          <div class="card" style="margin-top: 10px">
+
+          <label>Что в блоке</label>
+          <select v-model="block.kind">
+            <option value="text">Текст и картинка</option>
+            <option value="deck">Презентация (PDF)</option>
+          </select>
+
+          <template v-if="block.kind === 'deck'">
+            <label>Файл презентации</label>
+            <input type="file" accept="application/pdf,.pdf" @change="uploadPresentation(index, $event)" />
+            <p v-if="uploadingDeckIdx === index" class="muted" style="margin: 6px 0 0 0">
+              Режу презентацию на слайды, это занимает несколько секунд...
+            </p>
+            <p v-else-if="block.slides.length === 0" class="muted" style="margin: 6px 0 0 0">
+              Только PDF. В PowerPoint: «Файл» → «Сохранить как» → тип «PDF» — тогда слайды
+              приедут сотруднику ровно такими, как их сверстали.
+            </p>
+            <template v-else>
+              <p class="muted" style="margin: 6px 0 0 0">
+                Слайдов: {{ block.slides.length }}. Сотрудник листает их пальцем, тап по слайду —
+                увеличение. Чтобы заменить презентацию, выберите другой файл.
+              </p>
+              <div class="std-slides">
+                <div v-for="(slide, slideIndex) in block.slides" :key="slide.image_path" class="std-slide">
+                  <img :src="toMediaUrl(slide.image_path) || undefined" :alt="`Слайд ${slideIndex + 1}`" />
+                  <span class="std-slide-num">{{ slideIndex + 1 }}</span>
+                  <button
+                    type="button"
+                    class="std-slide-del"
+                    :aria-label="`Удалить слайд ${slideIndex + 1}`"
+                    @click="removeSlide(index, slideIndex)"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            </template>
+          </template>
+
+          <template v-else>
+            <label>Текст блока</label>
+            <textarea v-model="block.text" rows="5" required style="width: 100%; border: 1px solid #d0d8e5; border-radius: 10px; padding: 10px 12px;" />
+            <label>Картинка блока (опционально)</label>
+            <div class="actions-row">
+              <input v-model="block.image_path" placeholder="uploads/..." />
+              <input type="file" accept="image/*" @change="uploadBlockImage(index, $event)" />
+            </div>
+          </template>
+
+          <div v-if="block.kind !== 'deck'" class="card" style="margin-top: 10px">
             <div class="actions-row">
               <strong>Подблоки</strong>
               <button type="button" class="ghost" @click="addSubBlock(index)">Добавить подблок</button>
@@ -538,5 +670,48 @@ watch(
   padding: 2px 10px;
   font-size: 13px;
   white-space: nowrap;
+}
+
+/* Миниатюры залитых слайдов: админу надо убедиться, что PDF разобрался, и
+   выкинуть лишние страницы (титул, «спасибо за внимание»). */
+.std-slides {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.std-slide {
+  position: relative;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+.std-slide img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+}
+.std-slide-num {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  padding: 1px 6px;
+  font-size: 12px;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.72);
+}
+.std-slide-del {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  padding: 0;
+  line-height: 1;
+  font-size: 16px;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.72);
+  border: 0;
 }
 </style>

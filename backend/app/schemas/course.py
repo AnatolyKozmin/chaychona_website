@@ -3,11 +3,22 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class CourseBlockSlideCreate(BaseModel):
+    image_path: str = Field(min_length=1, max_length=1024)
+    width: int = 0
+    height: int = 0
+    sort_order: int = 0
+
+
 class CourseBlockCreate(BaseModel):
     heading: str | None = Field(default=None, max_length=255)
-    text: str = Field(min_length=1, max_length=20000)
+    # У колоды слайдов текста нет — обязательность проверяется по kind в API,
+    # а не схемой: иначе презентацию нельзя было бы сохранить без пустой строки.
+    text: str = Field(default="", max_length=20000)
     image_path: str | None = Field(default=None, max_length=1024)
     sort_order: int = 0
+    kind: str = "text"
+    slides: list["CourseBlockSlideCreate"] = Field(default_factory=list)
     subblocks: list["CourseSubBlockCreate"] = Field(default_factory=list)
 
 
@@ -35,6 +46,15 @@ class CourseCreate(BaseModel):
     blocks: list[CourseBlockCreate] = Field(default_factory=list, min_length=1)
 
 
+class CourseBlockSlidePublic(BaseModel):
+    id: int
+    image_path: str
+    image_url: str | None
+    width: int
+    height: int
+    sort_order: int
+
+
 class CourseBlockPublic(BaseModel):
     id: int
     heading: str | None
@@ -42,6 +62,9 @@ class CourseBlockPublic(BaseModel):
     image_path: str | None
     image_url: str | None
     sort_order: int
+    # 'text' или 'deck'. У 'deck' смысловое содержимое — в slides.
+    kind: str
+    slides: list["CourseBlockSlidePublic"]
     subblocks: list["CourseSubBlockPublic"]
 
 
@@ -120,6 +143,20 @@ class CourseLearnerStudyPublic(BaseModel):
     blocks_progress: list[CourseLearnerBlockProgressPublic]
     progress_percent: float
     linked_test_stats: CourseLearnerLinkedTestStatsPublic | None
+
+
+class CoursePresentationSlidePublic(BaseModel):
+    """Слайд, только что нарезанный из залитого PDF, ещё не привязанный к блоку."""
+
+    image_path: str
+    image_url: str | None
+    width: int
+    height: int
+    sort_order: int
+
+
+class CoursePresentationUploadResult(BaseModel):
+    slides: list[CoursePresentationSlidePublic]
 
 
 CourseBlockCreate.model_rebuild()

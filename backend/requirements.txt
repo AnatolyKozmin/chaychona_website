@@ -10,5 +10,10 @@ python-multipart
 python-dotenv
 openpyxl
 python-docx
+# Резка PDF-презентаций на слайды-картинки: pypdfium2 рендерит страницы,
+# Pillow пережимает их в jpeg. Оба — самодостаточные колёса, apt-пакетов
+# (poppler, LibreOffice) в образ ставить не надо.
+pypdfium2>=4,<6
+pillow>=10
 pytest>=8.0
 httpx

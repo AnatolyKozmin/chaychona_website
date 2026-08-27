@@ -289,6 +289,11 @@ def _run_startup() -> None:
                 "ON course_block_progress (user_id, course_id, block_id)"
             )
         )
+        # Блок стандарта стал двух видов: обычный текст и колода слайдов
+        # презентации. Всё, что было в базе до этого, — текст.
+        connection.execute(
+            text("ALTER TABLE course_blocks ADD COLUMN IF NOT EXISTS kind VARCHAR(16) NOT NULL DEFAULT 'text'")
+        )
         # Очередь медиа блюд стала трёхвидовой (image/audio/video) — таблица та же,
         # старые записи по смыслу были видео-склейкой, поэтому DEFAULT 'video'.
         connection.execute(

@@ -53,8 +53,36 @@ class CourseBlock(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False, index=True)
     heading: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # У блока-колоды текст обычно пустой: содержимое лежит на слайдах.
     text: Mapped[str] = mapped_column(Text, nullable=False)
     image_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 'text' — обычный блок с текстом и картинкой; 'deck' — колода слайдов
+    # презентации (course_block_slides). Всё остальное у блоков общее: прогресс,
+    # последовательная разблокировка, назначения курса.
+    kind: Mapped[str] = mapped_column(
+        String(16), default="text", server_default="text", nullable=False
+    )
+
+
+class CourseBlockSlide(Base):
+    """Один слайд презентации внутри блока-колоды.
+
+    Картинки лежат в общем хранилище медиа (`uploads/...`) и раздаются тем же
+    `GET /api/v1/menu/media`, что и остальные изображения. Размеры храним, чтобы
+    вёрстка резервировала место под слайд и лист не дёргался при подгрузке.
+    """
+
+    __tablename__ = "course_block_slides"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    # Блоки пересоздаются при каждом сохранении курса — слайды уходят вместе с ними.
+    block_id: Mapped[int] = mapped_column(
+        ForeignKey("course_blocks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    image_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    width: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
