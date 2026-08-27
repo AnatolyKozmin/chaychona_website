@@ -1,3 +1,4 @@
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -7,7 +8,15 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.db.session import get_db
-from app.models.menu import MenuBranch, MenuCategory, MenuDish, MenuDishVideoJob
+from app.models.menu import (
+    MenuBranch,
+    MenuCategory,
+    MenuDish,
+    MenuDishMediaJob,
+    MenuDishVideoJob,
+    MenuImportRow,
+    MenuImportSession,
+)
 from app.models.user import RestaurantCatalog, Role, User
 from app.schemas.menu import (
     MenuBranchCreate,
@@ -22,6 +31,12 @@ from app.schemas.menu import (
     MenuDishJobPublic,
     MenuDishJobsSummary,
     MenuFeedResponse,
+    MenuImportPreview,
+    MenuImportPreviewRow,
+    MenuImportResult,
+    MenuImportRowPublic,
+    MenuImportSessionDetail,
+    MenuImportSessionPublic,
     MenuMediaUploadResponse,
     MenuRestaurantPublic,
     GenerateVideosRequest,
@@ -34,6 +49,9 @@ from app.services.media import (
     UPLOAD_DIR,
     save_upload_bytes,
 )
+from app.services.generation import missing_key_warnings
+from app.services.menu_import import RegistryParseError, parse_registry
+from app.services.menu_import_runner import run_import
 
 router = APIRouter(prefix="/menu", tags=["menu"])
 UPLOAD_ROOT = UPLOAD_DIR
@@ -567,6 +585,7 @@ def _build_dish_job_public(job: MenuDishVideoJob, dish: MenuDish | None = None) 
         id=job.id,
         dish_id=job.dish_id,
         dish_name=dish.name if dish else None,
+        kind=job.kind or "video",
         status=job.status,
         error=job.error,
         attempts=job.attempts,
@@ -862,3 +881,386 @@ def generate_video_single(
     db.refresh(job)
     return _build_dish_job_public(job, dish)
 
+
+
+# Архив с сотней блюд и фотографиями весит сотни мегабайт — потолок отдельный
+# от одиночной загрузки медиа. Файл льём на диск, а не держим в памяти.
+MAX_IMPORT_SIZE_BYTES = 1024 * 1024 * 1024
+
+
+def _resolve_import_restaurant(
+    db: Session,
+    restaurant_id: str | None,
+    restaurant_name: str | None,
+) -> RestaurantCatalog:
+    """Найти ресторан-получатель или создать новый по имени.
+
+    Без ресторана не льём вообще: молча угадать «куда-нибудь» — верный способ
+    засыпать чужую точку чужим меню.
+    """
+    restaurant_uuid = _parse_restaurant_uuid(restaurant_id)
+    if restaurant_uuid:
+        restaurant = db.get(RestaurantCatalog, restaurant_uuid)
+        if not restaurant:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ресторан не найден")
+        return restaurant
+
+    name = " ".join((restaurant_name or "").split())
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Укажите ресторан: выберите существующий или введите название нового",
+        )
+    existing = db.scalar(
+        select(RestaurantCatalog).where(func.lower(RestaurantCatalog.name) == name.lower())
+    )
+    if existing:
+        return existing
+    restaurant = RestaurantCatalog(name=name)
+    db.add(restaurant)
+    db.commit()
+    db.refresh(restaurant)
+    return restaurant
+
+
+def _job_counters(db: Session, session_id: int) -> dict[str, int]:
+    counts = dict(
+        db.execute(
+            select(MenuDishMediaJob.status, func.count(MenuDishMediaJob.id))
+            .where(MenuDishMediaJob.session_id == session_id)
+            .group_by(MenuDishMediaJob.status)
+        ).all()
+    )
+    # `blocked` для заказчика — то же ожидание, что и `pending`: видео стоит в
+    # очереди за своей картинкой. Разделять их в интерфейсе незачем.
+    pending = int(counts.get("pending", 0)) + int(counts.get("blocked", 0))
+    return {
+        "jobs_pending": pending,
+        "jobs_processing": int(counts.get("processing", 0)),
+        "jobs_done": int(counts.get("done", 0)),
+        "jobs_error": int(counts.get("error", 0)),
+        "jobs_total": sum(int(v) for v in counts.values()),
+    }
+
+
+def _build_import_session_public(
+    db: Session,
+    session: MenuImportSession,
+    restaurant_names: dict[uuid.UUID, str] | None = None,
+) -> MenuImportSessionPublic:
+    name = None
+    if session.restaurant_id:
+        if restaurant_names is not None:
+            name = restaurant_names.get(session.restaurant_id)
+        else:
+            restaurant = db.get(RestaurantCatalog, session.restaurant_id)
+            name = restaurant.name if restaurant else None
+    return MenuImportSessionPublic(
+        id=session.id,
+        file_name=session.file_name,
+        restaurant_id=str(session.restaurant_id) if session.restaurant_id else None,
+        restaurant_name=name,
+        status=session.status,
+        error=session.error,
+        total_rows=session.total_rows,
+        created_dishes=session.created_dishes,
+        updated_dishes=session.updated_dishes,
+        failed_rows=session.failed_rows,
+        generate_image=session.generate_image,
+        generate_audio=session.generate_audio,
+        generate_video=session.generate_video,
+        created_at=session.created_at,
+        finished_at=session.finished_at,
+        **_job_counters(db, session.id),
+    )
+
+
+def _build_import_session_detail(db: Session, session: MenuImportSession) -> MenuImportSessionDetail:
+    rows = list(
+        db.scalars(
+            select(MenuImportRow)
+            .where(MenuImportRow.session_id == session.id)
+            .order_by(MenuImportRow.row_number.asc())
+        ).all()
+    )
+    failed = list(
+        db.scalars(
+            select(MenuDishMediaJob)
+            .where(
+                MenuDishMediaJob.session_id == session.id,
+                MenuDishMediaJob.status == "error",
+            )
+            .order_by(MenuDishMediaJob.id.asc())
+        ).all()
+    )
+    dishes_by_id: dict[int, MenuDish] = {}
+    dish_ids = {job.dish_id for job in failed}
+    if dish_ids:
+        dishes_by_id = {
+            dish.id: dish
+            for dish in db.scalars(select(MenuDish).where(MenuDish.id.in_(dish_ids))).all()
+        }
+    base = _build_import_session_public(db, session)
+    return MenuImportSessionDetail(
+        **base.model_dump(),
+        rows=[
+            MenuImportRowPublic(
+                row_number=row.row_number,
+                dish_name=row.dish_name,
+                category_name=row.category_name,
+                dish_id=row.dish_id,
+                status=row.status,
+                error=row.error,
+            )
+            for row in rows
+        ],
+        failed_jobs=[_build_dish_job_public(job, dishes_by_id.get(job.dish_id)) for job in failed],
+    )
+
+
+def _build_preview(
+    db: Session,
+    registry,
+    restaurant: RestaurantCatalog,
+    generate_image: bool,
+    generate_audio: bool,
+    generate_video: bool,
+) -> MenuImportPreview:
+    """Собрать план залива, ничего не записывая."""
+    existing_names = {
+        (name or "").strip().lower()
+        for name in db.scalars(
+            select(MenuDish.name).where(MenuDish.restaurant_id == restaurant.id)
+        ).all()
+    }
+    existing_categories = {
+        " ".join((name or "").split()).lower()
+        for name in db.scalars(
+            select(MenuCategory.name).where(MenuCategory.restaurant_id == restaurant.id)
+        ).all()
+    }
+
+    rows: list[MenuImportPreviewRow] = []
+    new_categories: list[str] = []
+    seen_categories: set[str] = set()
+    will_create = will_update = 0
+    images = audios = videos = 0
+
+    for row in registry.rows:
+        has_photo_dish = registry.read_media(row.photo_dish) is not None
+        has_photo_ingredients = registry.read_media(row.photo_ingredients) is not None
+        has_audio = registry.read_media(row.audio) is not None
+        exists = row.name.strip().lower() in existing_names
+        if exists:
+            will_update += 1
+        else:
+            will_create += 1
+
+        category_key = " ".join((row.category or "").split()).lower()
+        if category_key and category_key not in existing_categories and category_key not in seen_categories:
+            seen_categories.add(category_key)
+            new_categories.append(" ".join(row.category.split()))
+
+        need_image = generate_image and not has_photo_ingredients
+        need_audio = generate_audio and not has_audio and bool(row.description or row.ingredients)
+        images += int(need_image)
+        audios += int(need_audio)
+        if generate_video and (has_photo_ingredients or has_photo_dish or need_image) and (has_audio or need_audio):
+            videos += 1
+
+        rows.append(
+            MenuImportPreviewRow(
+                row_number=row.row_number,
+                name=row.name,
+                category=row.category,
+                ingredients=row.ingredients,
+                description=row.description,
+                has_photo_dish=has_photo_dish,
+                has_photo_ingredients=has_photo_ingredients,
+                has_audio=has_audio,
+                exists=exists,
+            )
+        )
+
+    return MenuImportPreview(
+        file_name=registry.source_name,
+        total_rows=len(registry.rows),
+        will_create=will_create,
+        will_update=will_update,
+        new_categories=new_categories,
+        will_generate_images=images,
+        will_generate_audio=audios,
+        will_generate_videos=videos,
+        rows=rows,
+    )
+
+
+@router.post("/admin/import", response_model=MenuImportResult, status_code=status.HTTP_201_CREATED)
+async def import_menu_file(
+    file: UploadFile = File(...),
+    restaurant_id: str | None = Form(None),
+    restaurant_name: str | None = Form(None),
+    generate_image: bool = Form(True),
+    generate_audio: bool = Form(True),
+    generate_video: bool = Form(True),
+    dry_run: bool = Form(False),
+    current_user: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Залить меню одним файлом: реестр .xlsx или .zip с реестром и медиа.
+
+    Текст и файлы из архива записываются сразу, а генерация недостающих
+    картинок ингредиентов и озвучек уезжает в фоновую очередь — прогресс
+    смотреть через GET /menu/admin/import/{id}.
+
+    `dry_run=true` ничего не пишет и возвращает только план: сколько блюд
+    создастся, сколько обновится, какие категории появятся и за что придётся
+    заплатить провайдеру.
+    """
+    file_name = (file.filename or "").strip() or "import.xlsx"
+    if not file_name.lower().endswith((".xlsx", ".xlsm", ".zip")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Поддерживаются только .xlsx и .zip",
+        )
+
+    restaurant = _resolve_import_restaurant(db, restaurant_id, restaurant_name)
+
+    # Пишем загрузку на диск потоком: архив на сотню блюд не должен целиком
+    # оказаться в памяти процесса.
+    suffix = Path(file_name).suffix.lower() or ".bin"
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    tmp_path = Path(tmp.name)
+    size = 0
+    try:
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            if size > MAX_IMPORT_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="Файл больше 1 ГБ — разбейте залив на части",
+                )
+            tmp.write(chunk)
+        tmp.close()
+        if size == 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пустой")
+
+        try:
+            registry = parse_registry(tmp_path, file_name)
+        except RegistryParseError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+        # Видео собирается своим ffmpeg локально, ключей не требует — про него
+        # предупреждать нечего.
+        warnings = missing_key_warnings(image=generate_image, audio=generate_audio)
+
+        try:
+            if dry_run:
+                return MenuImportResult(
+                    dry_run=True,
+                    preview=_build_preview(
+                        db, registry, restaurant, generate_image, generate_audio, generate_video
+                    ),
+                    warnings=warnings,
+                )
+            session = run_import(
+                db,
+                registry,
+                restaurant_id=restaurant.id,
+                generate_image=generate_image,
+                generate_audio=generate_audio,
+                generate_video=generate_video,
+                created_by_id=current_user.id,
+            )
+            return MenuImportResult(
+                dry_run=False,
+                session=_build_import_session_detail(db, session),
+                warnings=warnings,
+            )
+        finally:
+            registry.close()
+    finally:
+        tmp.close()
+        tmp_path.unlink(missing_ok=True)
+
+
+@router.get("/admin/import", response_model=list[MenuImportSessionPublic])
+def list_import_sessions(
+    limit: int = Query(default=50, ge=1, le=200),
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    """История заливов — свежие сверху."""
+    sessions = list(
+        db.scalars(
+            select(MenuImportSession).order_by(MenuImportSession.id.desc()).limit(limit)
+        ).all()
+    )
+    restaurant_ids = {s.restaurant_id for s in sessions if s.restaurant_id}
+    names: dict[uuid.UUID, str] = {}
+    if restaurant_ids:
+        names = {
+            row.id: row.name
+            for row in db.execute(
+                select(RestaurantCatalog.id, RestaurantCatalog.name).where(
+                    RestaurantCatalog.id.in_(restaurant_ids)
+                )
+            ).all()
+        }
+    return [_build_import_session_public(db, s, restaurant_names=names) for s in sessions]
+
+
+@router.get("/admin/import/{session_id}", response_model=MenuImportSessionDetail)
+def get_import_session(
+    session_id: int,
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Отчёт по одному заливу: построчно и с прогрессом генерации."""
+    session = db.get(MenuImportSession, session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Залив не найден")
+    return _build_import_session_detail(db, session)
+
+
+@router.post("/admin/import/{session_id}/retry", response_model=MenuImportSessionDetail)
+def retry_import_session(
+    session_id: int,
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Перезапустить упавшие задания залива.
+
+    Нужно ровно для типового случая: ключ провайдера протух или кончились
+    кредиты — чинишь и повторяешь, не заливая файл заново.
+    """
+    session = db.get(MenuImportSession, session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Залив не найден")
+
+    failed = list(
+        db.scalars(
+            select(MenuDishMediaJob).where(
+                MenuDishMediaJob.session_id == session_id,
+                MenuDishMediaJob.status == "error",
+            )
+        ).all()
+    )
+    for job in failed:
+        job.error = None
+        job.finished_at = None
+        # Видео снова ждёт исходники, если их так и нет.
+        if job.kind == "video":
+            dish = db.get(MenuDish, job.dish_id)
+            ready = bool(
+                dish and (dish.photo_ingredients_path or dish.photo_dish_path) and dish.audio_path
+            )
+            job.status = "pending" if ready else "blocked"
+        else:
+            job.status = "pending"
+    if failed:
+        session.status = "running"
+        session.finished_at = None
+    db.commit()
+    db.refresh(session)
+    return _build_import_session_detail(db, session)

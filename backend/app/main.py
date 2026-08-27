@@ -289,6 +289,31 @@ def _run_startup() -> None:
                 "ON course_block_progress (user_id, course_id, block_id)"
             )
         )
+        # Очередь медиа блюд стала трёхвидовой (image/audio/video) — таблица та же,
+        # старые записи по смыслу были видео-склейкой, поэтому DEFAULT 'video'.
+        connection.execute(
+            text("ALTER TABLE menu_dish_video_jobs ADD COLUMN IF NOT EXISTS kind VARCHAR(16) NOT NULL DEFAULT 'video'")
+        )
+        connection.execute(text("ALTER TABLE menu_dish_video_jobs ADD COLUMN IF NOT EXISTS prompt TEXT"))
+        connection.execute(text("ALTER TABLE menu_dish_video_jobs ADD COLUMN IF NOT EXISTS session_id INTEGER"))
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_menu_dish_video_jobs_kind ON menu_dish_video_jobs (kind)")
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_menu_dish_video_jobs_session_id ON menu_dish_video_jobs (session_id)")
+        )
+        connection.execute(
+            text(
+                "DO $$ "
+                "BEGIN "
+                "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'menu_dish_video_jobs_session_id_fkey') THEN "
+                "ALTER TABLE menu_dish_video_jobs "
+                "ADD CONSTRAINT menu_dish_video_jobs_session_id_fkey "
+                "FOREIGN KEY (session_id) REFERENCES menu_import_sessions (id) ON DELETE SET NULL; "
+                "END IF; "
+                "END $$;"
+            )
+        )
 
     db = SessionLocal()
     try:

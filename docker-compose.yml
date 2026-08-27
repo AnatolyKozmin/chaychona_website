@@ -27,6 +27,16 @@ services:
       BOOTSTRAP_SUPERADMIN_EMAIL: owner@example.com
       BOOTSTRAP_SUPERADMIN_PASSWORD: CHANGE_ME_PLEASE
       CONTENT_EXPORT_ROOT: /import/content_export
+      # Ключи генерации медиа при заливе меню файлом. Держим их в окружении
+      # хоста, а не в репозитории — сюда только пробрасываем.
+      MAGNIFIC_API_KEY: ${MAGNIFIC_API_KEY:-}
+      # Провайдер озвучки: elevenlabs (закрыт для российских IP) или yandex.
+      TTS_PROVIDER: ${TTS_PROVIDER:-elevenlabs}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}
+      YANDEX_TTS_API_KEY: ${YANDEX_TTS_API_KEY:-}
+      YANDEX_TTS_FOLDER_ID: ${YANDEX_TTS_FOLDER_ID:-}
+      YANDEX_TTS_VOICE: ${YANDEX_TTS_VOICE:-alena}
     depends_on:
       db:
         condition: service_healthy

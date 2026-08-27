@@ -94,6 +94,88 @@ interface VideoJobsSummary {
 const videoBusy = ref(false);
 const videoJobs = ref<VideoJobsSummary | null>(null);
 let videoPollTimer: number | null = null;
+
+interface ImportPreviewRow {
+  row_number: number;
+  name: string;
+  category: string | null;
+  ingredients: string | null;
+  description: string | null;
+  has_photo_dish: boolean;
+  has_photo_ingredients: boolean;
+  has_audio: boolean;
+  exists: boolean;
+}
+
+interface ImportPreview {
+  file_name: string;
+  total_rows: number;
+  will_create: number;
+  will_update: number;
+  new_categories: string[];
+  will_generate_images: number;
+  will_generate_audio: number;
+  will_generate_videos: number;
+  rows: ImportPreviewRow[];
+}
+
+interface ImportRow {
+  row_number: number;
+  dish_name: string | null;
+  category_name: string | null;
+  dish_id: number | null;
+  status: string;
+  error: string | null;
+}
+
+interface ImportJob {
+  id: number;
+  dish_id: number;
+  dish_name: string | null;
+  kind: string;
+  status: string;
+  error: string | null;
+}
+
+interface ImportSession {
+  id: number;
+  file_name: string;
+  restaurant_id: string | null;
+  restaurant_name: string | null;
+  status: string;
+  error: string | null;
+  total_rows: number;
+  created_dishes: number;
+  updated_dishes: number;
+  failed_rows: number;
+  created_at: string;
+  finished_at: string | null;
+  jobs_total: number;
+  jobs_pending: number;
+  jobs_processing: number;
+  jobs_done: number;
+  jobs_error: number;
+  rows?: ImportRow[];
+  failed_jobs?: ImportJob[];
+}
+
+const importFile = ref<File | null>(null);
+const importDragOver = ref(false);
+const importFileInput = ref<HTMLInputElement | null>(null);
+/** «existing» — залить в выбранный ресторан, «new» — создать по названию. */
+const importRestaurantMode = ref<"existing" | "new">("existing");
+const importRestaurantId = ref("");
+const importNewRestaurantName = ref("");
+const importGenerateImage = ref(true);
+const importGenerateAudio = ref(true);
+const importGenerateVideo = ref(true);
+const importBusy = ref(false);
+const importPreview = ref<ImportPreview | null>(null);
+// Ключи провайдеров живут на сервере: узнать, что их нет, можно только из ответа.
+const importWarnings = ref<string[]>([]);
+const importSession = ref<ImportSession | null>(null);
+const importSessions = ref<ImportSession[]>([]);
+let importPollTimer: number | null = null;
 const restaurants = ref<RestaurantItem[]>([]);
 const adminCategories = ref<DishCategory[]>([]);
 const adminDishes = ref<DishAdminItem[]>([]);
@@ -686,6 +768,183 @@ async function refreshVideoJobs() {
   }
 }
 
+function pickImportFile() {
+  importFileInput.value?.click();
+}
+
+function setImportFile(file: File | null) {
+  importFile.value = file;
+  // Старый разбор относится к прошлому файлу — показывать его рядом с новым
+  // именем нельзя, иначе легко залить не то, что смотрел.
+  importPreview.value = null;
+  importSession.value = null;
+  importWarnings.value = [];
+}
+
+function onImportFileChange(event: Event) {
+  const input = event.target as HTMLInputElement;
+  setImportFile(input.files?.[0] ?? null);
+}
+
+function onImportDrop(event: DragEvent) {
+  importDragOver.value = false;
+  setImportFile(event.dataTransfer?.files?.[0] ?? null);
+}
+
+function buildImportForm(dryRun: boolean): FormData | null {
+  if (!importFile.value) {
+    adminError.value = "Выберите файл реестра (.xlsx или .zip)";
+    return null;
+  }
+  const form = new FormData();
+  form.append("file", importFile.value);
+  if (importRestaurantMode.value === "new") {
+    const name = importNewRestaurantName.value.trim();
+    if (!name) {
+      adminError.value = "Введите название нового ресторана";
+      return null;
+    }
+    form.append("restaurant_name", name);
+  } else {
+    if (!importRestaurantId.value) {
+      adminError.value = "Выберите ресторан-получатель";
+      return null;
+    }
+    form.append("restaurant_id", importRestaurantId.value);
+  }
+  form.append("generate_image", String(importGenerateImage.value));
+  form.append("generate_audio", String(importGenerateAudio.value));
+  form.append("generate_video", String(importGenerateVideo.value));
+  form.append("dry_run", String(dryRun));
+  return form;
+}
+
+async function previewImport() {
+  adminError.value = "";
+  adminSuccess.value = "";
+  const form = buildImportForm(true);
+  if (!form) {
+    return;
+  }
+  importBusy.value = true;
+  try {
+    const { data } = await api.post<{ preview: ImportPreview | null; warnings?: string[] }>(
+      "/menu/admin/import",
+      form,
+    );
+    importPreview.value = data.preview;
+    importWarnings.value = data.warnings ?? [];
+    importSession.value = null;
+  } catch (e: any) {
+    adminError.value = e?.response?.data?.detail ?? "Не удалось разобрать файл";
+  } finally {
+    importBusy.value = false;
+  }
+}
+
+async function runImport() {
+  adminError.value = "";
+  adminSuccess.value = "";
+  const form = buildImportForm(false);
+  if (!form) {
+    return;
+  }
+  importBusy.value = true;
+  try {
+    const { data } = await api.post<{ session: ImportSession | null; warnings?: string[] }>(
+      "/menu/admin/import",
+      form,
+    );
+    importSession.value = data.session;
+    importWarnings.value = data.warnings ?? [];
+    importPreview.value = null;
+    adminSuccess.value = data.session
+      ? `Залив #${data.session.id}: создано ${data.session.created_dishes}, обновлено ${data.session.updated_dishes}.`
+      : "Залив выполнен";
+    await Promise.all([loadAdminCategories(), loadAdminDishes(), loadDishes(), loadImportSessions()]);
+    scheduleImportPoll();
+  } catch (e: any) {
+    adminError.value = e?.response?.data?.detail ?? "Не удалось залить файл";
+  } finally {
+    importBusy.value = false;
+  }
+}
+
+async function loadImportSessions() {
+  try {
+    const { data } = await api.get<ImportSession[]>("/menu/admin/import", { params: { limit: 20 } });
+    importSessions.value = data;
+  } catch {
+    // тихо: история заливов не критична для работы страницы
+  }
+}
+
+/** Тянуть статус залива, пока его очередь не опустеет. */
+function scheduleImportPoll() {
+  const session = importSession.value;
+  const active = session ? session.jobs_pending + session.jobs_processing : 0;
+  if (!session || active === 0) {
+    if (importPollTimer !== null) {
+      window.clearInterval(importPollTimer);
+      importPollTimer = null;
+    }
+    return;
+  }
+  if (importPollTimer === null) {
+    importPollTimer = window.setInterval(refreshImportSession, 5000);
+  }
+}
+
+async function refreshImportSession() {
+  const current = importSession.value;
+  if (!current) {
+    return;
+  }
+  try {
+    const { data } = await api.get<ImportSession>(`/menu/admin/import/${current.id}`);
+    importSession.value = data;
+    if (data.jobs_pending + data.jobs_processing === 0) {
+      // Очередь опустела — подтянуть проставленные пути к медиа.
+      await Promise.all([loadAdminDishes(), loadDishes()]);
+    }
+    scheduleImportPoll();
+  } catch {
+    // тихо: следующий тик попробует снова
+  }
+}
+
+async function retryImportSession() {
+  const current = importSession.value;
+  if (!current) {
+    return;
+  }
+  adminError.value = "";
+  adminSuccess.value = "";
+  importBusy.value = true;
+  try {
+    const { data } = await api.post<ImportSession>(`/menu/admin/import/${current.id}/retry`);
+    importSession.value = data;
+    adminSuccess.value = "Упавшие задания перезапущены";
+    scheduleImportPoll();
+  } catch (e: any) {
+    adminError.value = e?.response?.data?.detail ?? "Не удалось перезапустить задания";
+  } finally {
+    importBusy.value = false;
+  }
+}
+
+async function openImportSession(sessionId: number) {
+  adminError.value = "";
+  try {
+    const { data } = await api.get<ImportSession>(`/menu/admin/import/${sessionId}`);
+    importSession.value = data;
+    importPreview.value = null;
+    scheduleImportPoll();
+  } catch (e: any) {
+    adminError.value = e?.response?.data?.detail ?? "Не удалось открыть отчёт";
+  }
+}
+
 async function generateAllVideos() {
   const ok = window.confirm(
     "Поставить генерацию видео для всех блюд с фото и аудио, но без видео?"
@@ -908,6 +1167,7 @@ onMounted(() => {
     void loadAdminCategories();
     void loadAdminDishes();
     void refreshVideoJobs();
+    void loadImportSessions();
   }
 });
 
@@ -915,6 +1175,10 @@ onUnmounted(() => {
   if (videoPollTimer !== null) {
     window.clearInterval(videoPollTimer);
     videoPollTimer = null;
+  }
+  if (importPollTimer !== null) {
+    window.clearInterval(importPollTimer);
+    importPollTimer = null;
   }
 });
 
@@ -929,6 +1193,7 @@ watch(
     void loadAdminCategories();
     void loadAdminDishes();
     void refreshVideoJobs();
+    void loadImportSessions();
   }
 );
 
@@ -1169,6 +1434,283 @@ useBodyScrollLock(
     <p class="muted">Фото и аудио обязательны по процессу. Видео можно прикрепить отдельно (если уже собрано).</p>
     <p v-if="adminError" class="error">{{ adminError }}</p>
     <p v-if="adminSuccess" class="muted">{{ adminSuccess }}</p>
+
+    <div class="card">
+      <h3 style="margin: 0 0 8px 0">Загрузка меню файлом</h3>
+      <p class="muted" style="margin: 0 0 14px 0">
+        Реестр .xlsx с колонками «Раздел», «Блюдо», «Ингредиенты», «Текст озвучки» — или .zip,
+        внутри которого лежит этот реестр вместе с папками фотографий. Чего в файле нет,
+        сервер догенерирует сам: картинку ингредиентов, озвучку и видео.
+      </p>
+
+      <div
+        class="file-drop"
+        :class="{ 'file-drop--active': importDragOver, 'file-drop--filled': !!importFile }"
+        @click="pickImportFile"
+        @dragover.prevent="importDragOver = true"
+        @dragleave="importDragOver = false"
+        @drop.prevent="onImportDrop"
+      >
+        <input
+          ref="importFileInput"
+          type="file"
+          accept=".xlsx,.xlsm,.zip"
+          class="file-drop-input"
+          @change="onImportFileChange"
+        />
+        <template v-if="importFile">
+          <span class="file-drop-icon">📦</span>
+          <span class="file-drop-name">{{ importFile.name }}</span>
+          <span class="muted">Нажмите, чтобы выбрать другой файл</span>
+        </template>
+        <template v-else>
+          <span class="file-drop-icon">⬆️</span>
+          <span class="file-drop-name">Перетащите .xlsx или .zip сюда или нажмите для выбора</span>
+        </template>
+      </div>
+
+      <div class="menu-toolbar" style="margin-top: 14px">
+        <div class="menu-toolbar-filters">
+          <div class="filter-row">
+            <label class="filter-label">Ресторан</label>
+            <select v-model="importRestaurantMode" class="filter-select">
+              <option value="existing">Существующий</option>
+              <option value="new">Создать новый</option>
+            </select>
+          </div>
+          <div v-if="importRestaurantMode === 'existing'" class="filter-row">
+            <label class="filter-label">Какой</label>
+            <select v-model="importRestaurantId" class="filter-select">
+              <option value="">Выберите…</option>
+              <option v-for="item in restaurants" :key="item.id" :value="item.id">{{ item.name }}</option>
+            </select>
+          </div>
+          <div v-else class="filter-row">
+            <label class="filter-label">Название</label>
+            <input
+              v-model="importNewRestaurantName"
+              type="text"
+              class="filter-select"
+              placeholder="например Жизнь Удалась"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div class="menu-stats-row" style="margin-top: 12px; flex-wrap: wrap">
+        <label class="test-checkbox-label">
+          <input v-model="importGenerateImage" type="checkbox" />
+          Рисовать картинку ингредиентов
+        </label>
+        <label class="test-checkbox-label">
+          <input v-model="importGenerateAudio" type="checkbox" />
+          Озвучивать текст
+        </label>
+        <label class="test-checkbox-label">
+          <input v-model="importGenerateVideo" type="checkbox" />
+          Собирать видео
+        </label>
+      </div>
+      <p class="muted" style="margin: 8px 0 0 0; font-size: 13px">
+        Генерируем только то, чего нет в файле: если картинка или озвучка уже лежат в архиве,
+        провайдеру за них не платим.
+      </p>
+
+      <div class="actions-row" style="margin-top: 14px">
+        <button type="button" class="ghost" :disabled="importBusy" @click="previewImport">
+          {{ importBusy ? "Читаем…" : "Проверить файл" }}
+        </button>
+        <button type="button" :disabled="importBusy" @click="runImport">
+          {{ importBusy ? "Заливаем…" : "Загрузить" }}
+        </button>
+      </div>
+
+      <!-- Ключи провайдеров прописаны в .env сервера, а кнопку жмут отсюда: без
+           этого блока залив выглядел бы удачным, а генерация молча падала бы
+           в очереди. Текст и медиа из файла заезжают в любом случае. -->
+      <p v-for="warning in importWarnings" :key="warning" class="nb-warn">
+        {{ warning }}
+        <br />
+        Пропишите ключ на сервере и нажмите «Повторить упавшие» у этого залива —
+        текст и медиа из файла уже на месте.
+      </p>
+
+      <div v-if="importPreview" class="card" style="margin-top: 16px">
+        <h4 style="margin: 0 0 10px 0">Что получится: {{ importPreview.file_name }}</h4>
+        <div class="preview-summary">
+          <span class="role-chip">Строк: {{ importPreview.total_rows }}</span>
+          <span class="role-chip preview-summary-ok">Создать: {{ importPreview.will_create }}</span>
+          <span class="role-chip">Обновить: {{ importPreview.will_update }}</span>
+          <span v-if="importPreview.new_categories.length" class="role-chip">
+            Новых разделов: {{ importPreview.new_categories.length }}
+          </span>
+        </div>
+        <p v-if="importPreview.new_categories.length" class="muted" style="margin: 10px 0 0 0">
+          Появятся разделы: {{ importPreview.new_categories.join(", ") }}
+        </p>
+        <div class="menu-stats-row" style="margin-top: 12px; flex-wrap: wrap">
+          <span class="status-chip">Нарисовать картинок: {{ importPreview.will_generate_images }}</span>
+          <span class="status-chip">Озвучить: {{ importPreview.will_generate_audio }}</span>
+          <span class="status-chip">Собрать видео: {{ importPreview.will_generate_videos }}</span>
+        </div>
+        <div class="table-wrap" style="margin-top: 12px; max-height: 320px; overflow: auto">
+          <table>
+            <thead>
+              <tr>
+                <th>№</th>
+                <th>Блюдо</th>
+                <th>Раздел</th>
+                <th>Что в файле</th>
+                <th>Статус</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in importPreview.rows" :key="row.row_number">
+                <td>{{ row.row_number }}</td>
+                <td>{{ row.name }}</td>
+                <td>{{ row.category || "—" }}</td>
+                <td>
+                  <span v-if="row.has_photo_dish" class="status-chip status-chip-success">фото</span>
+                  <span v-if="row.has_photo_ingredients" class="status-chip status-chip-success">ингредиенты</span>
+                  <span v-if="row.has_audio" class="status-chip status-chip-success">озвучка</span>
+                  <span
+                    v-if="!row.has_photo_dish && !row.has_photo_ingredients && !row.has_audio"
+                    class="status-chip status-chip-muted"
+                  >
+                    только текст
+                  </span>
+                </td>
+                <td>
+                  <span v-if="row.exists" class="status-chip">обновится</span>
+                  <span v-else class="status-chip status-chip-success">новое</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div v-if="importSession" class="card" style="margin-top: 16px">
+        <div class="category-actions-header">
+          <h4 style="margin: 0">
+            Залив #{{ importSession.id }} · {{ importSession.file_name }}
+          </h4>
+          <div class="category-actions-buttons">
+            <button type="button" class="ghost" @click="refreshImportSession">Обновить</button>
+            <button
+              v-if="importSession.jobs_error > 0"
+              type="button"
+              class="ghost"
+              :disabled="importBusy"
+              @click="retryImportSession"
+            >
+              Повторить упавшие
+            </button>
+          </div>
+        </div>
+        <div class="menu-stats-row" style="margin-top: 12px; flex-wrap: wrap">
+          <span class="status-chip status-chip-success">Создано: {{ importSession.created_dishes }}</span>
+          <span class="status-chip">Обновлено: {{ importSession.updated_dishes }}</span>
+          <span v-if="importSession.failed_rows > 0" class="status-chip status-chip-error">
+            Строк с ошибкой: {{ importSession.failed_rows }}
+          </span>
+        </div>
+        <div v-if="importSession.jobs_total > 0" class="menu-stats-row" style="margin-top: 10px; flex-wrap: wrap">
+          <span class="status-chip">В очереди: {{ importSession.jobs_pending }}</span>
+          <span class="status-chip">В работе: {{ importSession.jobs_processing }}</span>
+          <span class="status-chip status-chip-success">Готово: {{ importSession.jobs_done }}</span>
+          <span v-if="importSession.jobs_error > 0" class="status-chip status-chip-error">
+            Ошибки: {{ importSession.jobs_error }}
+          </span>
+        </div>
+        <div v-if="importSession.jobs_total > 0" class="test-progress-bar" style="margin-top: 12px">
+          <div
+            class="test-progress-fill"
+            :style="{ width: Math.round((importSession.jobs_done / importSession.jobs_total) * 100) + '%' }"
+          ></div>
+        </div>
+
+        <template v-if="importSession.failed_jobs && importSession.failed_jobs.length">
+          <h4 style="margin: 16px 0 8px 0">Не сгенерировалось</h4>
+          <div class="table-wrap" style="max-height: 240px; overflow: auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Блюдо</th>
+                  <th>Стадия</th>
+                  <th>Ошибка</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="job in importSession.failed_jobs" :key="job.id">
+                  <td>{{ job.dish_name || job.dish_id }}</td>
+                  <td>{{ job.kind }}</td>
+                  <td class="long-text">{{ job.error }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+
+        <template v-if="importSession.rows && importSession.rows.some((row) => row.status === 'error')">
+          <h4 style="margin: 16px 0 8px 0">Строки, которые не заехали</h4>
+          <div class="table-wrap" style="max-height: 240px; overflow: auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>№</th>
+                  <th>Блюдо</th>
+                  <th>Ошибка</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="row in importSession.rows.filter((item) => item.status === 'error')"
+                  :key="row.row_number"
+                >
+                  <td>{{ row.row_number }}</td>
+                  <td>{{ row.dish_name || "—" }}</td>
+                  <td class="long-text">{{ row.error }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </div>
+
+      <template v-if="importSessions.length">
+        <h4 style="margin: 18px 0 8px 0">История заливов</h4>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Файл</th>
+                <th>Ресторан</th>
+                <th>Итог</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in importSessions" :key="item.id">
+                <td>{{ item.id }}</td>
+                <td>{{ item.file_name }}</td>
+                <td>{{ item.restaurant_name || "—" }}</td>
+                <td>
+                  +{{ item.created_dishes }} / ~{{ item.updated_dishes }}
+                  <span v-if="item.jobs_error > 0" class="status-chip status-chip-error">
+                    ошибок: {{ item.jobs_error }}
+                  </span>
+                </td>
+                <td>
+                  <button type="button" class="ghost" @click="openImportSession(item.id)">Отчёт</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+    </div>
 
     <div class="card">
       <div class="category-actions-header">
