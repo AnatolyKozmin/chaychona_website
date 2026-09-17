@@ -20,12 +20,16 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/restaurant_training
-      JWT_SECRET_KEY: CHANGE_ME_TO_LONG_RANDOM_SECRET
+      # Секреты — только из .env рядом с этим файлом (в git не попадает).
+      # Без значения compose откажется стартовать: дефолт из публичного
+      # репозитория позволял бы подделать токен любого пользователя.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in .env}
       JWT_ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: 30
       REFRESH_TOKEN_EXPIRE_DAYS: 7
-      BOOTSTRAP_SUPERADMIN_EMAIL: owner@example.com
-      BOOTSTRAP_SUPERADMIN_PASSWORD: CHANGE_ME_PLEASE
+      # Пароль этого суперадмина перезаписывается при каждом старте backend.
+      BOOTSTRAP_SUPERADMIN_EMAIL: ${BOOTSTRAP_SUPERADMIN_EMAIL:-owner@example.com}
+      BOOTSTRAP_SUPERADMIN_PASSWORD: ${BOOTSTRAP_SUPERADMIN_PASSWORD:?BOOTSTRAP_SUPERADMIN_PASSWORD must be set in .env}
       CONTENT_EXPORT_ROOT: /import/content_export
       # Ключи генерации медиа при заливе меню файлом. Держим их в окружении
       # хоста, а не в репозитории — сюда только пробрасываем.
