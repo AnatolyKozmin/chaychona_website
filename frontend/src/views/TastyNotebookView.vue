@@ -271,6 +271,17 @@ const currentDish = computed(() =>
   openedDishIndex.value === null ? null : visibleDishes.value[openedDishIndex.value] ?? null
 );
 const currentIngredients = computed(() => splitIngredients(currentDish.value?.ingredients));
+
+// Видео — главное в карточке: там блюдо с озвучкой, которую официант слушает
+// перед подачей. Поэтому каждое блюдо открывается на видео, если оно есть,
+// а фото — вторая вкладка. Следим за самим блюдом, а не за точками входа:
+// открыть, пролистать свайпом и отфильтровать — всё это меняет карточку.
+watch(
+  () => currentDish.value?.id,
+  () => {
+    showVideo.value = Boolean(currentDish.value?.video_url);
+  }
+);
 const currentAllergens = computed(() => parseAllergens(currentDish.value?.allergens));
 const hasNext = computed(
   () => openedDishIndex.value !== null && openedDishIndex.value < visibleDishes.value.length - 1
@@ -1069,7 +1080,6 @@ function selectCategory(categoryName: string) {
 
 function openDish(index: number) {
   openedDishIndex.value = index;
-  showVideo.value = false;
 }
 
 function closeDish() {
@@ -1112,7 +1122,6 @@ function goNext() {
     return;
   }
   openedDishIndex.value += 1;
-  showVideo.value = false;
 }
 
 function goPrev() {
@@ -1120,7 +1129,6 @@ function goPrev() {
     return;
   }
   openedDishIndex.value -= 1;
-  showVideo.value = false;
 }
 
 /*
@@ -1386,7 +1394,9 @@ useBodyScrollLock(
       />
       <video
         v-else-if="showVideo && currentDish.video_url"
+        :key="currentDish.id"
         :src="toMediaUrl(currentDish.video_url) || undefined"
+        :poster="toMediaUrl(currentDish.image_url) || undefined"
         controls
         playsinline
         preload="metadata"
@@ -1399,8 +1409,8 @@ useBodyScrollLock(
       </div>
 
       <div v-if="currentDish.video_url" class="nb-media-switch">
-        <button type="button" :class="{ active: !showVideo }" @click="showVideo = false">Фото</button>
         <button type="button" :class="{ active: showVideo }" @click="showVideo = true">Видео</button>
+        <button type="button" :class="{ active: !showVideo }" @click="showVideo = false">Фото</button>
       </div>
     </div>
 

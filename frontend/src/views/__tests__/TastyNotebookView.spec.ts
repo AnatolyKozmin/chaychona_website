@@ -188,3 +188,54 @@ describe("TastyNotebookView — экран официанта", () => {
     expect(wrapper.findAll(".nb-tile")).toHaveLength(3);
   });
 });
+
+describe("TastyNotebookView — видео раньше фото", () => {
+  const WITH_VIDEO = [
+    { ...DISHES[0], video_url: "/uploads/1.mp4" },
+    { ...DISHES[1], image_url: "/uploads/2.png", video_url: "/uploads/2.mp4" },
+    { ...DISHES[2], image_url: "/uploads/3.png", video_url: null }
+  ];
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(api, "get").mockImplementation((url: string) => {
+      if (url === "/menu/restaurants") return Promise.resolve({ data: RESTAURANTS } as any);
+      if (url === "/menu/categories") return Promise.resolve({ data: CATEGORIES } as any);
+      if (url === "/menu/feed") return Promise.resolve({ data: { total: WITH_VIDEO.length, items: WITH_VIDEO } } as any);
+      return Promise.resolve({ data: [] } as any);
+    });
+  });
+
+  it("открывает блюдо сразу на видео, фото — вторая вкладка", async () => {
+    const wrapper = await mountView();
+
+    await wrapper.findAll(".nb-tile")[0].trigger("click");
+
+    const media = wrapper.find(".nb-sheet-media");
+    expect(media.find("video").exists()).toBe(true);
+    expect(media.find("video").attributes("poster")).toContain("1.png");
+    expect(media.findAll(".nb-media-switch button").map((b) => b.text())).toEqual(["Видео", "Фото"]);
+
+    await media.findAll(".nb-media-switch button")[1].trigger("click");
+    expect(wrapper.find(".nb-sheet-media img").exists()).toBe(true);
+  });
+
+  it("при листании следующее блюдо тоже начинается с видео", async () => {
+    const wrapper = await mountView();
+    await wrapper.findAll(".nb-tile")[0].trigger("click");
+    await wrapper.findAll(".nb-sheet-media .nb-media-switch button")[1].trigger("click");
+
+    await wrapper.findAll(".nb-sheet-nav button")[1].trigger("click");
+
+    expect(wrapper.find(".nb-sheet-media video").exists()).toBe(true);
+  });
+
+  it("блюдо без видео открывается на фото", async () => {
+    const wrapper = await mountView();
+
+    await wrapper.findAll(".nb-tile")[2].trigger("click");
+
+    expect(wrapper.find(".nb-sheet-media video").exists()).toBe(false);
+    expect(wrapper.find(".nb-sheet-media img").exists()).toBe(true);
+  });
+});
