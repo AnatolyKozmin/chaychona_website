@@ -7,7 +7,10 @@ class RegisterRequest(BaseModel):
     restaurant: str = Field(min_length=2, max_length=255)
     job_title: str = Field(min_length=2, max_length=255)
     desired_login: str = Field(min_length=3, max_length=255)
-    password: str = Field(min_length=8, max_length=128)
+    # 6 символов — компромисс: официант набирает пароль с телефона в зале, и
+    # требование в 8 знаков с неочевидной ошибкой было главной причиной, по
+    # которой люди «не могли зарегистрироваться». Любые буквы, кириллица тоже.
+    password: str = Field(min_length=6, max_length=128)
 
 
 class LoginRequest(BaseModel):

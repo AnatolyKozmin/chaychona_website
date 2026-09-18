@@ -34,9 +34,9 @@ Backend endpoints:
 - `POST /api/v1/users/registration-requests/{request_id}/reject` (superadmin)
 
 Registration flow:
-- User submits access request via `POST /api/v1/auth/register` with `first_name`, `last_name`, `restaurant`, `job_title`, `desired_login`, `password`
-- Superadmin reviews request in Users page and approves/rejects it
-- Approved request creates learner account; then user can login
+- Employee registers via `POST /api/v1/auth/register` with `first_name`, `last_name`, `restaurant`, `job_title`, `desired_login`, `password` (min 6 chars)
+- The learner account is created immediately and the response is a token pair — no approval step
+- A `registration_requests` row is kept with status `approved` as a history record
 
 ## Dishes content import
 

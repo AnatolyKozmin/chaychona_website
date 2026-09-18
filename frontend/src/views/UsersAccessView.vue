@@ -233,7 +233,10 @@ onMounted(async () => {
     <!-- Заявки на доступ -->
     <div v-if="activeTab === 'requests' && auth.isSuperadmin">
       <div class="actions-row" style="margin-bottom: 14px">
-        <p class="muted" style="margin: 0">Пользователи, которые хотят получить доступ к системе. Одобрите или отклоните заявку.</p>
+        <p class="muted" style="margin: 0">
+          Сотрудники регистрируются сами, аккаунт работает сразу — здесь история регистраций.
+          Одобрять вручную нужно только старые заявки, если они остались.
+        </p>
         <button type="button" class="ghost" @click="loadRequests">Обновить</button>
       </div>
       <div class="table-wrap">

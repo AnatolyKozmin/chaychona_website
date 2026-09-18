@@ -13,7 +13,7 @@
 
 - Нет Alembic — миграции схемы — это idempotent raw SQL в `backend/app/main.py::_run_startup`, выполняется при каждом старте backend. Новые изменения схемы дописывать туда же.
 - Роли: `superadmin` / `admin` / `learner` (у learner отдельное поле `job_title` для трека контента). См. `backend/app/models/user.py`.
-- Регистрация — заявочная (`registration_requests`), одобряет superadmin.
+- Регистрация **самостоятельная**: `POST /auth/register` сразу создаёт learner и отдаёт токены; `registration_requests` пишется со статусом `approved` только для истории. Старую неодобренную заявку «одобряет» первый вход с её паролем (`/auth/login`). Логин при регистрации и входе приводится к `strip().lower()` — так его набирает клавиатура телефона.
 - JWT access+refresh, frontend (`frontend/src/api/client.ts`) авто-рефрешит токен по 401.
 - Контент (курсы/тесты/чек-листы) таргетируется через `restaurant_id` + `job_title_id`.
 

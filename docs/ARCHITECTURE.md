@@ -39,7 +39,7 @@ docker-compose.local.yml  — dev-профиль (hot reload, Vite на 5173, Po
 - `admin` — операционный доступ: видит пользователей, меняет `job_title` у learner'ов
 - `learner` — проходит курсы/тесты/чек-листы; поле `job_title` отделяет контент-трек (официант/бармен/...) без смены уровня доступа
 
-Регистрация — заявочная: `POST /auth/register` создаёт `RegistrationRequest` (pending), superadmin одобряет/отклоняет (`/users/registration-requests/...`) → при approve создаётся `User` с ролью `learner`.
+Регистрация — самостоятельная: `POST /auth/register` сразу создаёт `User` с ролью `learner` и возвращает пару токенов, так что сотрудник входит без ожидания. `RegistrationRequest` пишется со статусом `approved` — только как история «кто и когда зарегистрировался». Заявки, поданные до этого и оставшиеся `pending`, превращаются в аккаунт при первом входе с их паролем. Эндпоинты ручного одобрения (`/users/registration-requests/...`) остались для старых заявок.
 
 JWT: access (короткий) + refresh (длинный) токен, `frontend/src/api/client.ts` автоматически дёргает `/auth/refresh` при 401 и повторяет запрос.
 

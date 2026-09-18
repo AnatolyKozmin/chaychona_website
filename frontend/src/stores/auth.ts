@@ -35,6 +35,36 @@ interface TokenPair {
   token_type: "bearer";
 }
 
+/** Текст ошибки для человека, а не для разработчика.
+ *
+ * FastAPI на ошибку валидации отдаёт `detail` массивом объектов — без разбора
+ * на экране появлялось «[object Object]», и человек не понимал, что не так
+ * с паролем. Нет ответа вовсе — значит, пропала связь, а не «неверный пароль».
+ */
+export function describeAuthError(error: any, fallback: string): string {
+  if (!error?.response) {
+    return "Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.";
+  }
+  const detail = error.response.data?.detail;
+  if (typeof detail === "string") {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    const fields = detail.map((item: any) => String(item?.loc?.[item.loc.length - 1] ?? ""));
+    if (fields.includes("password")) {
+      return "Пароль должен быть не короче 6 символов.";
+    }
+    if (fields.includes("desired_login")) {
+      return "Логин должен быть не короче 3 символов.";
+    }
+    if (fields.includes("first_name") || fields.includes("last_name")) {
+      return "Имя и фамилия — не короче 2 букв.";
+    }
+    return "Проверьте, что все поля заполнены.";
+  }
+  return fallback;
+}
+
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<User | null>(null);
   const loading = ref(false);
@@ -46,13 +76,19 @@ export const useAuthStore = defineStore("auth", () => {
   const isAdmin = computed(() => user.value?.role === "admin" || user.value?.role === "superadmin");
   const isSuperadmin = computed(() => user.value?.role === "superadmin");
 
+  const registerError = ref("");
+
+  /** Регистрация сразу создаёт аккаунт и входит в него — без одобрения. */
   async function register(payload: RegisterPayload) {
     loading.value = true;
-    errorMessage.value = "";
+    registerError.value = "";
     try {
-      await api.post("/auth/register", payload);
+      const { data } = await api.post<TokenPair>("/auth/register", payload);
+      setTokens(data.access_token, data.refresh_token);
+      await fetchMe();
     } catch (error: any) {
-      errorMessage.value = error?.response?.data?.detail ?? "Ошибка регистрации";
+      clearTokens();
+      registerError.value = describeAuthError(error, "Не удалось зарегистрироваться");
       throw error;
     } finally {
       loading.value = false;
@@ -68,7 +104,7 @@ export const useAuthStore = defineStore("auth", () => {
       await fetchMe();
     } catch (error: any) {
       clearTokens();
-      errorMessage.value = error?.response?.data?.detail ?? "Ошибка входа";
+      errorMessage.value = describeAuthError(error, "Не удалось войти");
       throw error;
     } finally {
       loading.value = false;
@@ -118,6 +154,7 @@ export const useAuthStore = defineStore("auth", () => {
     user,
     loading,
     errorMessage,
+    registerError,
     isAuthenticated,
     isAdmin,
     isSuperadmin,
