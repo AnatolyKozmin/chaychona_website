@@ -2331,6 +2331,37 @@ tr:hover td {
   letter-spacing: 0.05em;
 }
 
+.people-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.people-actions button {
+  width: auto;
+}
+
+.people-action-danger {
+  color: #b42318;
+  border-color: #f1c0bb;
+}
+
+/* Временный пароль виден один раз — выделяем, чтобы его не проглядели. */
+.people-temp-password {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid #111827;
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.people-temp-password-value {
+  margin: 8px 0;
+  font-size: 1.05rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .people-card-arrow {
   color: #94a3b8;
   font-size: 1.1rem;

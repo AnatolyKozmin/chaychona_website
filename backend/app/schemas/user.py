@@ -58,6 +58,16 @@ class RegistrationRequestPublic(BaseModel):
     processed_at: datetime | None
 
 
+class SetActiveRequest(BaseModel):
+    is_active: bool
+
+
+class PasswordResetResult(BaseModel):
+    login: str
+    # Показывается администратору один раз — в базе хранится только хэш.
+    temporary_password: str
+
+
 class CatalogItemCreate(BaseModel):
     name: str = Field(min_length=2, max_length=255)
 

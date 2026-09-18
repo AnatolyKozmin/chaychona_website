@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime
 from uuid import UUID
 
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.models.checklist import Checklist, ChecklistCompletion, ChecklistItem
-from app.models.course import Course
+from app.models.course import Course, CourseBlockProgress
 from app.models.menu import MenuCategory, MenuDish
 from app.models.quiz import QuizAttempt, QuizTest, QuizTestAssignment
 from app.core.security import get_password_hash
@@ -26,8 +27,10 @@ from app.schemas.user import (
     CreateUserRequest,
     JobTitleCatalogItemCreate,
     JobTitleCatalogItemPublic,
+    PasswordResetResult,
     RegistrationRequestPublic,
     RestaurantWithRolesPublic,
+    SetActiveRequest,
     SetLearnerProfileRequest,
     SetJobTitleRequest,
     SetRoleRequest,
@@ -210,6 +213,116 @@ def set_learner_profile(
     db.commit()
     db.refresh(user)
     return user
+
+
+def _manageable_user(db: Session, user_id: UUID, current_user: User) -> User:
+    """Сотрудник, которым текущий админ вправе управлять.
+
+    Админ ресторана управляет только обучающимися; себя трогать нельзя никому —
+    иначе можно случайно запереть самого себя.
+    """
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    if user.id == current_user.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Со своей учётной записью так нельзя")
+    if current_user.role == Role.ADMIN and user.role != Role.LEARNER:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Администратор управляет только сотрудниками")
+    return user
+
+
+@router.patch("/{user_id}/active", response_model=UserPublic)
+def set_user_active(
+    user_id: UUID,
+    payload: SetActiveRequest,
+    current_user: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Отправить сотрудника в архив или вернуть из него.
+
+    Архивный не может войти и не мешает в общем списке, но его результаты
+    тестов и чек-листов остаются в аналитике — за этим архив и нужен вместо
+    удаления.
+    """
+    user = _manageable_user(db, user_id, current_user)
+    if not payload.is_active and user.role == Role.SUPERADMIN:
+        active_superadmins = db.scalar(
+            select(func.count(User.id)).where(User.role == Role.SUPERADMIN, User.is_active.is_(True))
+        ) or 0
+        if active_superadmins <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="В системе должен остаться хотя бы один активный суперадмин",
+            )
+    user.is_active = payload.is_active
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: UUID,
+    current_user: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Удалить пустой аккаунт — дубль или ошибочную регистрацию.
+
+    Сотрудника с результатами удалять нельзя: пропадёт его история в
+    аналитике. Для уволенных есть архив.
+    """
+    user = _manageable_user(db, user_id, current_user)
+    traces = {
+        "попытки тестов": db.scalar(select(func.count(QuizAttempt.id)).where(QuizAttempt.user_id == user.id)),
+        "чек-листы": db.scalar(
+            select(func.count(ChecklistCompletion.id)).where(ChecklistCompletion.user_id == user.id)
+        ),
+        "прогресс по стандартам": db.scalar(
+            select(func.count(CourseBlockProgress.id)).where(CourseBlockProgress.user_id == user.id)
+        ),
+        "созданные тесты": db.scalar(select(func.count(QuizTest.id)).where(QuizTest.created_by_user_id == user.id)),
+    }
+    found = [name for name, count in traces.items() if count]
+    if found:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"У сотрудника есть {', '.join(found)} — удаление стёрло бы их из аналитики. "
+                "Отправьте его в архив."
+            ),
+        )
+    db.execute(
+        update(RegistrationRequest)
+        .where(RegistrationRequest.processed_by_user_id == user.id)
+        .values(processed_by_user_id=None)
+    )
+    db.delete(user)
+    db.commit()
+
+
+# Без похожих символов: временный пароль диктуют голосом или пишут на бумажке,
+# и «l/1/I» или «O/0» гарантированно перепутают.
+_TEMP_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
+_TEMP_PASSWORD_LENGTH = 8
+
+
+@router.post("/{user_id}/reset-password", response_model=PasswordResetResult)
+def reset_user_password(
+    user_id: UUID,
+    current_user: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Выдать сотруднику временный пароль вместо забытого.
+
+    Почты и телефона у сотрудников в системе нет, поэтому ссылку на сброс
+    отправить некуда — пароль выдаёт администратор. Показываем его один раз:
+    в базе остаётся только хэш.
+    """
+    user = _manageable_user(db, user_id, current_user)
+    password = "".join(secrets.choice(_TEMP_PASSWORD_ALPHABET) for _ in range(_TEMP_PASSWORD_LENGTH))
+    user.password_hash = get_password_hash(password)
+    db.commit()
+    return PasswordResetResult(login=user.email, temporary_password=password)
 
 
 @router.post("", response_model=UserPublic, status_code=status.HTTP_201_CREATED)

@@ -58,7 +58,7 @@ JWT: access (короткий) + refresh (длинный) токен, `frontend/
 ## API (backend/app/api/v1, префикс `/api/v1`)
 
 - **auth.py** — `register`, `login`, `refresh`, `me`
-- **users.py** — список/активность пользователей, смена роли/job-title/learner-profile, создание юзера, обработка заявок на регистрацию, справочники ресторанов/должностей (`/catalog/...`)
+- **users.py** — список/активность пользователей, смена роли/job-title/learner-profile, архив (`PATCH /{id}/active`), удаление пустого аккаунта (`DELETE /{id}`, 409 при наличии результатов), сброс пароля (`POST /{id}/reset-password`), создание юзера, обработка заявок на регистрацию, справочники ресторанов/должностей (`/catalog/...`)
 - **courses.py** — CRUD курсов (`/admin`), нарезка залитой презентации на слайды (`POST /admin/presentation`, multipart, только `.pdf`), для learner: `/my`, `/my-overview`, прохождение блоков (`/my/{id}/study`, `/my/{id}/blocks/{id}/complete`)
 - **tests.py** — CRUD тестов, прохождение (`/my`, `/{id}/take`, `/{id}/submit`), история попыток (`/my-attempts`), аналитика (`/analytics`), импорт из Excel/Word (`/import-xlsx`, `/import-docx`, `/parse-docx`, `/import-apply`, `/import-template`)
 - **checklists.py** — типы смен, CRUD чек-листов, прохождение (`/my`, `/my/{id}/complete`), журнал прохождений (`/admin/completions`), загрузка фото (`/media`)

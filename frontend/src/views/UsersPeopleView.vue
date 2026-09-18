@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { api } from "../api/client";
+import { useAuthStore } from "../stores/auth";
 
 type UserRole = "superadmin" | "admin" | "learner";
 
@@ -48,6 +49,24 @@ const selectedUser = ref<UserRecord | null>(null);
 const activity = ref<UserActivity | null>(null);
 const activityLoading = ref(false);
 
+const auth = useAuthStore();
+/** По умолчанию — только работающие: уволенные не должны мешать в общем списке. */
+const statusFilter = ref<"active" | "archived" | "all">("active");
+const actionBusy = ref(false);
+const actionMessage = ref("");
+const actionError = ref("");
+/** Временный пароль после сброса — показываем один раз, в базе только хэш. */
+const temporaryPassword = ref<{ login: string; password: string } | null>(null);
+
+const archivedCount = computed(() => users.value.filter((u) => !u.is_active).length);
+
+/** Можно ли текущему админу управлять этим человеком — так же решает сервер. */
+function canManage(user: UserRecord): boolean {
+  if (user.id === auth.user?.id) return false;
+  if (auth.isSuperadmin) return true;
+  return user.role === "learner";
+}
+
 const filteredUsers = computed(() => {
   let list = users.value;
   const q = searchQuery.value.trim().toLowerCase();
@@ -65,6 +84,11 @@ const filteredUsers = computed(() => {
   }
   if (filterRestaurant.value) {
     list = list.filter((u) => (u.restaurant || "") === filterRestaurant.value);
+  }
+  if (statusFilter.value === "active") {
+    list = list.filter((u) => u.is_active);
+  } else if (statusFilter.value === "archived") {
+    list = list.filter((u) => !u.is_active);
   }
   return list;
 });
@@ -113,6 +137,61 @@ async function openUserDetail(user: UserRecord) {
 function closeUserDetail() {
   selectedUser.value = null;
   activity.value = null;
+  temporaryPassword.value = null;
+  actionMessage.value = "";
+  actionError.value = "";
+}
+
+function replaceUser(updated: UserRecord) {
+  users.value = users.value.map((u) => (u.id === updated.id ? updated : u));
+  if (selectedUser.value?.id === updated.id) {
+    selectedUser.value = updated;
+  }
+}
+
+async function runAction(action: () => Promise<void>) {
+  actionBusy.value = true;
+  actionMessage.value = "";
+  actionError.value = "";
+  try {
+    await action();
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail;
+    actionError.value = typeof detail === "string" ? detail : "Не получилось, попробуйте ещё раз";
+  } finally {
+    actionBusy.value = false;
+  }
+}
+
+function setArchived(user: UserRecord, archived: boolean) {
+  const question = archived
+    ? `Отправить ${user.full_name} в архив? Войти он не сможет, результаты останутся в аналитике.`
+    : `Вернуть ${user.full_name} из архива? Он снова сможет войти.`;
+  if (!window.confirm(question)) return;
+  void runAction(async () => {
+    const { data } = await api.patch<UserRecord>(`/users/${user.id}/active`, { is_active: !archived });
+    replaceUser(data);
+    actionMessage.value = archived ? "Сотрудник в архиве." : "Сотрудник снова активен.";
+  });
+}
+
+function resetPassword(user: UserRecord) {
+  if (!window.confirm(`Выдать ${user.full_name} новый временный пароль? Старый перестанет работать.`)) return;
+  void runAction(async () => {
+    const { data } = await api.post<{ login: string; temporary_password: string }>(
+      `/users/${user.id}/reset-password`
+    );
+    temporaryPassword.value = { login: data.login, password: data.temporary_password };
+  });
+}
+
+function deleteUser(user: UserRecord) {
+  if (!window.confirm(`Удалить ${user.full_name} насовсем? Это только для дублей и ошибочных регистраций.`)) return;
+  void runAction(async () => {
+    await api.delete(`/users/${user.id}`);
+    users.value = users.value.filter((u) => u.id !== user.id);
+    closeUserDetail();
+  });
 }
 
 function scorePercent(item: { total_questions: number; correct_answers: number }): number {
@@ -154,6 +233,14 @@ onMounted(() => {
             </select>
           </div>
           <div class="filter-row">
+            <label class="filter-label">Статус</label>
+            <select v-model="statusFilter" class="filter-select">
+              <option value="active">Работают</option>
+              <option value="archived">Архив ({{ archivedCount }})</option>
+              <option value="all">Все</option>
+            </select>
+          </div>
+          <div class="filter-row">
             <label class="filter-label">Ресторан</label>
             <select v-model="filterRestaurant" class="filter-select">
               <option value="">Все</option>
@@ -179,6 +266,7 @@ onMounted(() => {
               {{ user.restaurant || "-" }} · {{ user.job_title || "-" }}
             </p>
           </div>
+          <span v-if="!user.is_active" class="status-chip status-chip-muted">в архиве</span>
           <span class="people-card-role">{{ user.role }}</span>
           <span class="people-card-arrow">→</span>
         </div>
@@ -197,6 +285,43 @@ onMounted(() => {
         <p v-if="selectedUser.restaurant" class="muted" style="margin: 0 0 16px 0">
           {{ selectedUser.restaurant }} · {{ selectedUser.job_title || "-" }}
         </p>
+
+        <div v-if="canManage(selectedUser)" class="people-actions">
+          <button type="button" class="ghost" :disabled="actionBusy" @click="resetPassword(selectedUser)">
+            Сбросить пароль
+          </button>
+          <button
+            v-if="selectedUser.is_active"
+            type="button"
+            class="ghost"
+            :disabled="actionBusy"
+            @click="setArchived(selectedUser, true)"
+          >
+            В архив
+          </button>
+          <button v-else type="button" class="ghost" :disabled="actionBusy" @click="setArchived(selectedUser, false)">
+            Вернуть из архива
+          </button>
+          <button
+            v-if="auth.isSuperadmin"
+            type="button"
+            class="ghost people-action-danger"
+            :disabled="actionBusy"
+            @click="deleteUser(selectedUser)"
+          >
+            Удалить
+          </button>
+        </div>
+        <div v-if="temporaryPassword" class="people-temp-password">
+          <p style="margin: 0">Временный пароль для входа — передайте сотруднику:</p>
+          <p class="people-temp-password-value">
+            Логин: <strong>{{ temporaryPassword.login }}</strong><br />
+            Пароль: <strong>{{ temporaryPassword.password }}</strong>
+          </p>
+          <p class="muted" style="margin: 0">Больше он нигде не показывается — запишите сейчас.</p>
+        </div>
+        <p v-if="actionMessage" class="muted">{{ actionMessage }}</p>
+        <p v-if="actionError" class="error">{{ actionError }}</p>
 
         <p v-if="activityLoading">Загрузка...</p>
         <template v-else-if="activity">
