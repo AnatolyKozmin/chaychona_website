@@ -398,6 +398,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Сайт и API живут на разных портах, и без этого браузер прячет от страницы
+    # заголовок с именем файла — выгрузка Excel скачивалась бы безымянной.
+    expose_headers=["Content-Disposition"],
 )
 
 app.include_router(auth_router, prefix="/api/v1")

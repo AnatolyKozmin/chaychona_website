@@ -1,10 +1,11 @@
 import io
 import random
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from sqlalchemy import delete, func, select, update
@@ -13,6 +14,14 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
 from app.db.session import get_db
+from app.services.analytics_export import (
+    LOCAL_TZ,
+    AnswerRow,
+    AttemptRow,
+    EmployeeRow,
+    build_workbook,
+    local_time,
+)
 from app.word_tests_import import parse_docx_to_questions
 from app.models.quiz import (
     QuestionType,
@@ -551,6 +560,144 @@ def tests_scoreboard(
     scoreboard_users.sort(key=lambda item: item.user_name.lower())
 
     return QuizScoreboardResponse(tests=test_refs, users=scoreboard_users)
+
+
+@router.get("/analytics/export")
+def export_analytics_xlsx(
+    restaurant: str | None = Query(default=None, description="Ресторан сотрудника, как в справочнике"),
+    job_title: str | None = Query(default=None, description="Должность сотрудника"),
+    test_id: int | None = Query(default=None),
+    date_from: date | None = Query(default=None, description="С этой даты включительно, по Москве"),
+    date_to: date | None = Query(default=None, description="По эту дату включительно, по Москве"),
+    include_archived: bool = Query(default=True, description="Учитывать попытки сотрудников из архива"),
+    _: User = Depends(require_roles(Role.SUPERADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Результаты тестов в Excel: попытки, сотрудники, рестораны, тесты, сложные вопросы.
+
+    Номер попытки считается по всей истории сотрудника, а не внутри выбранного
+    периода: «третья попытка» должна значить третью, даже если первые две
+    были в прошлом месяце.
+    """
+    numbered = select(
+        QuizAttempt.id.label("attempt_id"),
+        func.row_number()
+        .over(
+            partition_by=(QuizAttempt.user_id, QuizAttempt.test_id),
+            order_by=(QuizAttempt.finished_at.asc(), QuizAttempt.id.asc()),
+        )
+        .label("attempt_number"),
+    ).subquery()
+
+    query = (
+        select(QuizAttempt, User, QuizTest.title, numbered.c.attempt_number)
+        .join(User, User.id == QuizAttempt.user_id)
+        .join(QuizTest, QuizTest.id == QuizAttempt.test_id)
+        .join(numbered, numbered.c.attempt_id == QuizAttempt.id)
+    )
+    description: list[str] = []
+    restaurant_name = (restaurant or "").strip() or None
+    job_title_name = (job_title or "").strip() or None
+    if restaurant_name:
+        query = query.where(User.restaurant == restaurant_name)
+        description.append(f"Ресторан: {restaurant_name}")
+    if job_title_name:
+        query = query.where(User.job_title == job_title_name)
+        description.append(f"Должность: {job_title_name}")
+    if test_id is not None:
+        query = query.where(QuizAttempt.test_id == test_id)
+        test = db.get(QuizTest, test_id)
+        description.append(f"Тест: {test.title if test else test_id}")
+    # Границы дней — московские: «за 8 сентября» значит с 00:00 до 24:00 по Москве.
+    if date_from is not None:
+        start = datetime.combine(date_from, datetime.min.time(), LOCAL_TZ).astimezone(timezone.utc)
+        query = query.where(QuizAttempt.finished_at >= start.replace(tzinfo=None))
+        description.append(f"С: {date_from.strftime('%d.%m.%Y')}")
+    if date_to is not None:
+        end = datetime.combine(date_to + timedelta(days=1), datetime.min.time(), LOCAL_TZ).astimezone(timezone.utc)
+        query = query.where(QuizAttempt.finished_at < end.replace(tzinfo=None))
+        description.append(f"По: {date_to.strftime('%d.%m.%Y')}")
+    if not include_archived:
+        query = query.where(User.is_active.is_(True))
+    description.append(f"Сотрудники из архива: {'учтены' if include_archived else 'не учтены'}")
+
+    attempts = [
+        AttemptRow(
+            attempt_id=attempt.id,
+            user_id=str(user.id),
+            user_name=user.full_name,
+            user_login=user.email,
+            restaurant=user.restaurant,
+            job_title=user.job_title,
+            user_active=user.is_active,
+            test_id=attempt.test_id,
+            test_title=title,
+            attempt_number=int(number),
+            finished_at=attempt.finished_at,
+            duration_seconds=attempt.duration_seconds,
+            total_questions=attempt.total_questions,
+            correct_answers=attempt.correct_answers,
+        )
+        for attempt, user, title, number in db.execute(query).all()
+    ]
+
+    titles = {row.attempt_id: row.test_title for row in attempts}
+    answers: list[AnswerRow] = []
+    attempt_ids = list(titles)
+    # Пачками: список id уходит в запрос параметрами, а их у Postgres не бесконечно.
+    for offset in range(0, len(attempt_ids), 5000):
+        chunk = attempt_ids[offset : offset + 5000]
+        for attempt_id, question_text, is_correct in db.execute(
+            select(QuizAttemptAnswer.attempt_id, QuizAttemptAnswer.question_text, QuizAttemptAnswer.is_correct)
+            .where(QuizAttemptAnswer.attempt_id.in_(chunk))
+        ).all():
+            answers.append(
+                AnswerRow(
+                    attempt_id=attempt_id,
+                    test_title=titles[attempt_id],
+                    question_text=question_text,
+                    is_correct=is_correct,
+                )
+            )
+
+    # Команда — работающие обучающиеся в пределах того же ресторана и должности.
+    team_query = select(User).where(User.role == Role.LEARNER, User.is_active.is_(True))
+    if restaurant_name:
+        team_query = team_query.where(User.restaurant == restaurant_name)
+    if job_title_name:
+        team_query = team_query.where(User.job_title == job_title_name)
+    team = list(db.scalars(team_query).all())
+    team_sizes: dict[str, int] = {}
+    for member in team:
+        key = member.restaurant or "без ресторана"
+        team_sizes[key] = team_sizes.get(key, 0) + 1
+    attempted = {row.user_id for row in attempts}
+    without_attempts = [
+        EmployeeRow(
+            user_id=str(member.id),
+            user_name=member.full_name,
+            user_login=member.email,
+            restaurant=member.restaurant,
+            job_title=member.job_title,
+        )
+        for member in team
+        if str(member.id) not in attempted
+    ]
+
+    content = build_workbook(attempts, answers, without_attempts, team_sizes, description)
+    stamp = local_time(datetime.utcnow()).strftime("%Y-%m-%d")
+    readable = f"Результаты тестов {restaurant_name or 'все рестораны'} {stamp}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            # ASCII-имя для старых браузеров, русское — для всех остальных.
+            "Content-Disposition": (
+                f'attachment; filename="tests_results_{stamp}.xlsx"; '
+                f"filename*=UTF-8''{quote(readable)}"
+            )
+        },
+    )
 
 
 @router.get("/analytics", response_model=QuizAnalyticsResponse)

@@ -400,6 +400,84 @@ const filteredAttempts = computed(() => {
   });
 });
 
+// --- Выгрузка в Excel: фильтры отдельные от вкладок — файл режут под
+// конкретного управляющего, а смотреть на странице могут другой срез.
+const exportForm = ref({
+  restaurant: "",
+  jobTitle: "",
+  testId: "" as string,
+  dateFrom: "",
+  dateTo: "",
+  includeArchived: true
+});
+const exportBusy = ref(false);
+const exportError = ref("");
+
+const exportRestaurants = computed(() =>
+  [...new Set(directory.value.filter((u) => u.role === "learner" && u.restaurant).map((u) => u.restaurant as string))].sort(
+    (a, b) => a.localeCompare(b)
+  )
+);
+const exportJobTitles = computed(() =>
+  [
+    ...new Set(
+      directory.value
+        .filter((u) => u.role === "learner" && u.job_title)
+        .filter((u) => !exportForm.value.restaurant || u.restaurant === exportForm.value.restaurant)
+        .map((u) => u.job_title as string)
+    )
+  ].sort((a, b) => a.localeCompare(b))
+);
+
+function onExportRestaurantChange() {
+  if (exportForm.value.jobTitle && !exportJobTitles.value.includes(exportForm.value.jobTitle)) {
+    exportForm.value.jobTitle = "";
+  }
+}
+
+/** Имя файла из заголовка ответа: сервер кладёт туда русское имя с рестораном и датой. */
+function fileNameFromHeader(header: string | undefined): string {
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header ?? "")?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      // упадём на запасное имя ниже
+    }
+  }
+  return "Результаты тестов.xlsx";
+}
+
+async function downloadExport() {
+  exportBusy.value = true;
+  exportError.value = "";
+  const form = exportForm.value;
+  const params: Record<string, string | boolean> = { include_archived: form.includeArchived };
+  if (form.restaurant) params.restaurant = form.restaurant;
+  if (form.jobTitle) params.job_title = form.jobTitle;
+  if (form.testId) params.test_id = form.testId;
+  if (form.dateFrom) params.date_from = form.dateFrom;
+  if (form.dateTo) params.date_to = form.dateTo;
+  try {
+    const response = await api.get("/tests/analytics/export", { params, responseType: "blob" });
+    const blob = new Blob([response.data], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileNameFromHeader(response.headers?.["content-disposition"]);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  } catch {
+    exportError.value = "Не удалось сформировать файл. Попробуйте ещё раз.";
+  } finally {
+    exportBusy.value = false;
+  }
+}
+
 async function loadAnalytics() {
   loading.value = true;
   error.value = "";
@@ -478,6 +556,53 @@ onMounted(async () => {
     <p v-if="loading">Загрузка...</p>
 
     <template v-if="analytics && !loading">
+      <div class="card export-card">
+        <h3 style="margin: 0 0 4px 0">Выгрузка в Excel</h3>
+        <p class="muted" style="margin: 0 0 12px 0">
+          Попытки, сводка по сотрудникам и ресторанам, сложные вопросы и кто ещё не проходил тесты — отдельными листами.
+          Пустой фильтр — без ограничения.
+        </p>
+        <div class="menu-toolbar-filters export-filters">
+          <div class="filter-row">
+            <label class="filter-label" for="export-restaurant">Ресторан</label>
+            <select id="export-restaurant" v-model="exportForm.restaurant" class="filter-select" @change="onExportRestaurantChange">
+              <option value="">Все</option>
+              <option v-for="name in exportRestaurants" :key="name" :value="name">{{ name }}</option>
+            </select>
+          </div>
+          <div class="filter-row">
+            <label class="filter-label" for="export-job">Должность</label>
+            <select id="export-job" v-model="exportForm.jobTitle" class="filter-select">
+              <option value="">Все</option>
+              <option v-for="name in exportJobTitles" :key="name" :value="name">{{ name }}</option>
+            </select>
+          </div>
+          <div class="filter-row">
+            <label class="filter-label" for="export-test">Тест</label>
+            <select id="export-test" v-model="exportForm.testId" class="filter-select">
+              <option value="">Все</option>
+              <option v-for="test in scoreboard?.tests ?? []" :key="test.id" :value="String(test.id)">{{ test.title }}</option>
+            </select>
+          </div>
+          <div class="filter-row">
+            <label class="filter-label" for="export-from">С</label>
+            <input id="export-from" v-model="exportForm.dateFrom" type="date" class="filter-select" />
+          </div>
+          <div class="filter-row">
+            <label class="filter-label" for="export-to">По</label>
+            <input id="export-to" v-model="exportForm.dateTo" type="date" class="filter-select" />
+          </div>
+        </div>
+        <label class="export-archived">
+          <input v-model="exportForm.includeArchived" type="checkbox" />
+          Учитывать сотрудников из архива
+        </label>
+        <button type="button" class="export-button" :disabled="exportBusy" @click="downloadExport">
+          {{ exportBusy ? "Готовлю файл..." : "Скачать Excel" }}
+        </button>
+        <p v-if="exportError" class="error">{{ exportError }}</p>
+      </div>
+
       <div class="tests-tabs" role="tablist">
         <button type="button" class="tests-tab" :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">Обзор</button>
         <button type="button" class="tests-tab" :class="{ active: activeTab === 'restaurant' }" @click="activeTab = 'restaurant'">По ресторану</button>
