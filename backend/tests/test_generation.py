@@ -10,6 +10,7 @@ from app.services.generation import (
     build_ingredients_prompt,
     generate_ingredients_image,
     missing_key_warnings,
+    missing_keys,
     synthesize_speech,
 )
 
@@ -361,12 +362,27 @@ def test_warns_that_audio_will_wait_without_a_yandex_key(settings):
 
 
 def test_warns_about_a_missing_elevenlabs_key(settings):
+    """Подсказка называет конкретную переменную — иначе непонятно, что дописывать в .env."""
     settings.elevenlabs_api_key = None
 
     warnings = missing_key_warnings(image=False, audio=True)
 
     assert len(warnings) == 1
-    assert "не генерируется" in warnings[0]
+    assert "ELEVENLABS_API_KEY" in warnings[0]
+    assert "продакшен" in warnings[0]
+
+
+def test_missing_keys_name_exactly_what_to_add(settings):
+    settings.magnific_api_key = None
+    settings.tts_provider = "yandex"
+    settings.yandex_tts_api_key = None
+
+    assert missing_keys() == ["MAGNIFIC_API_KEY", "YANDEX_TTS_API_KEY"]
+    assert missing_keys(image=False) == ["YANDEX_TTS_API_KEY"]
+
+
+def test_missing_keys_empty_when_everything_is_set(settings):
+    assert missing_keys() == []
 
 
 def test_stub_mode_is_reported_even_with_keys_around(settings):

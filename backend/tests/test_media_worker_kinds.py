@@ -59,6 +59,7 @@ def _dish(**kwargs):
 
 
 def test_image_job_saves_generated_photo(monkeypatch):
+    monkeypatch.setattr(vw, "image_ready", lambda: True)
     monkeypatch.setattr(
         vw, "generate_ingredients_image", lambda prompt: (b"png-bytes", ".png")
     )
@@ -86,10 +87,11 @@ def test_image_job_without_prompt_fails():
 
 
 def test_image_job_reports_provider_error(monkeypatch):
-    """Нет ключа — задание падает с текстом провайдера, а не молча."""
+    """Ключ есть, но провайдер отказал — задание падает с его текстом, а не молча."""
+    monkeypatch.setattr(vw, "image_ready", lambda: True)
 
     def boom(_prompt):
-        raise GenerationError("Не задан MAGNIFIC_API_KEY")
+        raise GenerationError("Magnific ответил 402: закончились кредиты")
 
     monkeypatch.setattr(vw, "generate_ingredients_image", boom)
     dish = _dish()
@@ -99,7 +101,26 @@ def test_image_job_reports_provider_error(monkeypatch):
     vw._process_image_job(db, job, dish)
 
     assert job.status == "error"
-    assert "MAGNIFIC_API_KEY" in job.error
+    assert "кредиты" in job.error
+    assert dish.photo_ingredients_path is None
+
+
+def test_image_job_waits_for_a_key_instead_of_failing(monkeypatch):
+    """Без MAGNIFIC_API_KEY картинка ждёт ключа, а не пишет ошибку на каждое блюдо."""
+    monkeypatch.setattr(vw, "image_ready", lambda: False)
+
+    def must_not_be_called(prompt):
+        raise AssertionError("без ключа к провайдеру не ходим")
+
+    monkeypatch.setattr(vw, "generate_ingredients_image", must_not_be_called)
+    dish = _dish()
+    job = _job("image", prompt="ингредиенты плова")
+    db = FakeSession({})
+
+    vw._process_image_job(db, job, dish)
+
+    assert job.status == vw.WAITING_KEY_STATUS
+    assert job.error is None
     assert dish.photo_ingredients_path is None
 
 
@@ -130,7 +151,7 @@ def test_audio_job_waits_when_no_tts_provider_is_configured(monkeypatch):
 
     vw._process_audio_job(db, job, dish)
 
-    assert job.status == vw.WAITING_TTS_STATUS
+    assert job.status == vw.WAITING_KEY_STATUS
     assert job.error is None
     assert dish.audio_path is None
 

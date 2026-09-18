@@ -59,6 +59,11 @@ def test_video_source_changes_when_audio_replaced():
 # ---- unit: решение о пересборке видео в update_dish_admin (без БД) ----
 
 
+class _EmptyResult:
+    def all(self):
+        return []
+
+
 class FakeSession:
     """Мини-Session для прямого вызова update_dish_admin: без Postgres.
 
@@ -76,6 +81,10 @@ class FakeSession:
 
     def scalar(self, _stmt):
         return self._pending_job_id
+
+    def execute(self, _stmt):
+        # Ответ собирает признак «озвучка ждёт в очереди» — здесь её нет.
+        return _EmptyResult()
 
     def add(self, obj):
         self.added.append(obj)

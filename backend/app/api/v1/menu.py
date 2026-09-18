@@ -49,7 +49,8 @@ from app.services.media import (
     UPLOAD_DIR,
     save_upload_bytes,
 )
-from app.services.generation import missing_key_warnings
+from app.services.generation import missing_key_warnings, missing_keys
+from app.services.video_worker import WAITING_KEY_STATUS
 from app.services.menu_import import RegistryParseError, parse_registry
 from app.services.menu_import_runner import run_import
 
@@ -125,14 +126,25 @@ def _dishes_awaiting_audio(db: Session, dish_ids: list[int]) -> set[int]:
         .where(
             MenuDishMediaJob.dish_id.in_(dish_ids),
             MenuDishMediaJob.kind == "audio",
-            MenuDishMediaJob.status.in_(("pending", "processing", "waiting_tts")),
+            MenuDishMediaJob.status.in_(("pending", "processing", WAITING_KEY_STATUS)),
         )
         .distinct()
     ).all()
     return {row[0] for row in rows}
 
 
-def _build_dish_admin_public(db: Session, dish: MenuDish) -> MenuDishAdminPublic:
+def _build_dish_admin_public(
+    db: Session,
+    dish: MenuDish,
+    awaiting_audio: set[int] | None = None,
+) -> MenuDishAdminPublic:
+    """Карточка блюда для админки.
+
+    `awaiting_audio` передаёт список целиком: посчитать его одним запросом на
+    сотни блюд дешевле, чем спрашивать очередь по каждому отдельно.
+    """
+    if awaiting_audio is None:
+        awaiting_audio = _dishes_awaiting_audio(db, [dish.id])
     category = db.get(MenuCategory, dish.category_id) if dish.category_id else None
     branch_name = None
     if category and category.branch_id:
@@ -156,7 +168,7 @@ def _build_dish_admin_public(db: Session, dish: MenuDish) -> MenuDishAdminPublic
         photo_ingredients_path=dish.photo_ingredients_path,
         audio_path=dish.audio_path,
         video_path=dish.video_path,
-        audio_pending=not dish.audio_path and bool(_dishes_awaiting_audio(db, [dish.id])),
+        audio_pending=not dish.audio_path and dish.id in awaiting_audio,
     )
 
 
@@ -456,7 +468,8 @@ def list_dishes_admin(
     if category_id is not None:
         query = query.where(MenuDish.category_id == category_id)
     dishes = list(db.scalars(query).all())
-    return [_build_dish_admin_public(db, dish) for dish in dishes]
+    awaiting_audio = _dishes_awaiting_audio(db, [dish.id for dish in dishes])
+    return [_build_dish_admin_public(db, dish, awaiting_audio) for dish in dishes]
 
 
 @router.post("/admin/dishes", response_model=MenuDishAdminPublic, status_code=status.HTTP_201_CREATED)
@@ -963,6 +976,10 @@ def _job_counters(db: Session, session_id: int) -> dict[str, int]:
         "jobs_processing": int(counts.get("processing", 0)),
         "jobs_done": int(counts.get("done", 0)),
         "jobs_error": int(counts.get("error", 0)),
+        "jobs_waiting_key": int(counts.get(WAITING_KEY_STATUS, 0)),
+        # Видео, которое ждёт свои картинку и озвучку. Для заказчика это та же
+        # очередь, но опрашивать сервер ради него незачем, если стадии ждут ключ.
+        "jobs_blocked": int(counts.get("blocked", 0)),
         "jobs_total": sum(int(v) for v in counts.values()),
     }
 
@@ -995,6 +1012,9 @@ def _build_import_session_public(
         generate_video=session.generate_video,
         created_at=session.created_at,
         finished_at=session.finished_at,
+        # Список ключей считаем по текущему .env, а не по моменту залива: как
+        # только ключ пропишут, подсказка должна исчезнуть сама.
+        missing_keys=missing_keys(image=session.generate_image, audio=session.generate_audio),
         **_job_counters(db, session.id),
     )
 

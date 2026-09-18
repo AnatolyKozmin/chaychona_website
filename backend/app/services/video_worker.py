@@ -4,8 +4,11 @@
 из `menu_dish_video_jobs` и выполняет его в зависимости от вида:
 
 - `image` — картинка ингредиентов по промпту (Magnific);
-- `audio` — озвучка текста (ElevenLabs);
+- `audio` — озвучка текста (ElevenLabs или Yandex, см. `TTS_PROVIDER`);
 - `video` — склейка картинки и озвучки в mp4 (ffmpeg, локально).
+
+Если ключа провайдера на сервере нет, `image` и `audio` не падают, а уходят в
+`waiting_key` и сами возвращаются в очередь, как только ключ появится.
 
 Заявка захватывается через `FOR UPDATE SKIP LOCKED`, поэтому безопасно даже
 при нескольких воркерах.
@@ -32,6 +35,7 @@ from app.services.generation import (
     TTS_STUB,
     GenerationError,
     generate_ingredients_image,
+    image_ready,
     synthesize_speech,
     tts_mode,
 )
@@ -43,13 +47,14 @@ logger = logging.getLogger(__name__)
 _worker_started = False
 _stop_event = threading.Event()
 
-# `waiting_tts` — озвучка, которую пока некому сделать: провайдер не настроен.
-# Это не ошибка и не работа — задание ждёт ключа, поэтому в claim не попадает,
-# а видео по такому блюду остаётся заблокированным, а не закрывается ошибкой.
-WAITING_TTS_STATUS = "waiting_tts"
+# `waiting_key` — картинка или озвучка, которую пока нечем сделать: на сервере
+# нет ключа провайдера. Это не ошибка и не работа — задание ждёт ключа, поэтому
+# в claim не попадает, а видео по такому блюду остаётся заблокированным, а не
+# закрывается ошибкой.
+WAITING_KEY_STATUS = "waiting_key"
 
 # Статусы, при которых задание ещё в работе.
-UNFINISHED_STATUSES = ("blocked", "pending", "processing", WAITING_TTS_STATUS)
+UNFINISHED_STATUSES = ("blocked", "pending", "processing", WAITING_KEY_STATUS)
 
 
 def _claim_next_job(db: Session) -> int | None:
@@ -84,10 +89,22 @@ def _finish(db: Session, job: MenuDishMediaJob) -> None:
     db.commit()
 
 
+def _wait_for_key(db: Session, job: MenuDishMediaJob) -> None:
+    """Отложить задание до появления ключа провайдера — без ошибки."""
+    job.status = WAITING_KEY_STATUS
+    job.error = None
+    job.updated_at = datetime.utcnow()
+    db.commit()
+    logger.info("Задание %s (%s): отложено — на сервере нет ключа провайдера", job.id, job.kind)
+
+
 def _process_image_job(db: Session, job: MenuDishMediaJob, dish: MenuDish) -> None:
     prompt = (job.prompt or "").strip()
     if not prompt:
         _fail(db, job, "Нет промпта для генерации картинки")
+        return
+    if not image_ready():
+        _wait_for_key(db, job)
         return
     try:
         content, ext = generate_ingredients_image(prompt)
@@ -105,11 +122,7 @@ def _process_audio_job(db: Session, job: MenuDishMediaJob, dish: MenuDish) -> No
         _fail(db, job, "Нет текста для озвучки")
         return
     if tts_mode() == TTS_STUB:
-        job.status = WAITING_TTS_STATUS
-        job.error = None
-        job.updated_at = datetime.utcnow()
-        db.commit()
-        logger.info("Задание %s: озвучка отложена — провайдер не настроен", job.id)
+        _wait_for_key(db, job)
         return
     try:
         content, ext = synthesize_speech(voice_text)
@@ -234,15 +247,21 @@ def _process_job(db: Session, job_id: int) -> None:
     _close_session_if_done(db, job.session_id)
 
 
-def _wake_waiting_audio_jobs(db: Session) -> int:
-    """Вернуть отложенные озвучки в очередь, когда провайдер наконец настроен."""
-    if tts_mode() == TTS_STUB:
+def _wake_waiting_jobs(db: Session) -> int:
+    """Вернуть отложенные задания в очередь, когда на сервере появился ключ."""
+    kinds = []
+    if image_ready():
+        kinds.append("image")
+    if tts_mode() != TTS_STUB:
+        kinds.append("audio")
+    if not kinds:
         return 0
     woken = db.execute(
         text(
             "UPDATE menu_dish_video_jobs SET status='pending', updated_at=NOW() "
-            f"WHERE kind='audio' AND status='{WAITING_TTS_STATUS}' RETURNING id"
-        )
+            "WHERE status = :waiting AND kind = ANY(:kinds) RETURNING id"
+        ),
+        {"waiting": WAITING_KEY_STATUS, "kinds": kinds},
     ).fetchall()
     db.commit()
     return len(woken)
@@ -256,11 +275,11 @@ def _run_loop() -> None:
         job_id: int | None = None
         db = SessionLocal()
         try:
-            # Ключ озвучки могли прописать уже после залива меню — тогда
-            # отложенные задания надо поднять, не заставляя перезаливать файл.
-            woken = _wake_waiting_audio_jobs(db)
+            # Ключ могли прописать уже после залива меню — тогда отложенные
+            # задания надо поднять, не заставляя перезаливать файл.
+            woken = _wake_waiting_jobs(db)
             if woken:
-                logger.info("Озвучка: вернули в очередь %s отложенных заданий", woken)
+                logger.info("Появился ключ: вернули в очередь %s отложенных заданий", woken)
             job_id = _claim_next_job(db)
             if job_id is not None:
                 _process_job(db, job_id)

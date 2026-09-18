@@ -60,6 +60,7 @@ interface DishAdminItem {
   photo_ingredients_path: string | null;
   audio_path: string | null;
   video_path: string | null;
+  audio_pending: boolean;
 }
 
 const auth = useAuthStore();
@@ -159,6 +160,9 @@ interface ImportSession {
   jobs_processing: number;
   jobs_done: number;
   jobs_error: number;
+  jobs_waiting_key: number;
+  jobs_blocked: number;
+  missing_keys: string[];
   rows?: ImportRow[];
   failed_jobs?: ImportJob[];
 }
@@ -883,10 +887,20 @@ async function loadImportSessions() {
   }
 }
 
+/** Сколько заданий залива реально может сдвинуться прямо сейчас.
+ *
+ * Видео в `blocked` ждёт свои картинку и озвучку; если те ждут ключа на
+ * сервере, опрашивать каждые 5 секунд бессмысленно — ничего не изменится,
+ * пока ключ не пропишут.
+ */
+function importActiveJobs(session: ImportSession): number {
+  return session.jobs_pending - session.jobs_blocked + session.jobs_processing;
+}
+
 /** Тянуть статус залива, пока его очередь не опустеет. */
 function scheduleImportPoll() {
   const session = importSession.value;
-  const active = session ? session.jobs_pending + session.jobs_processing : 0;
+  const active = session ? importActiveJobs(session) : 0;
   if (!session || active === 0) {
     if (importPollTimer !== null) {
       window.clearInterval(importPollTimer);
@@ -907,7 +921,7 @@ async function refreshImportSession() {
   try {
     const { data } = await api.get<ImportSession>(`/menu/admin/import/${current.id}`);
     importSession.value = data;
-    if (data.jobs_pending + data.jobs_processing === 0) {
+    if (importActiveJobs(data) === 0) {
       // Очередь опустела — подтянуть проставленные пути к медиа.
       await Promise.all([loadAdminDishes(), loadDishes()]);
     }
@@ -1551,8 +1565,8 @@ useBodyScrollLock(
       <p v-for="warning in importWarnings" :key="warning" class="nb-warn">
         {{ warning }}
         <br />
-        Пропишите ключ на сервере и нажмите «Повторить упавшие» у этого залива —
-        текст и медиа из файла уже на месте.
+        Текст и фото из файла уже на месте. Как только ключ появится на сервере,
+        генерация пойдёт сама — перезаливать файл не нужно.
       </p>
 
       <div v-if="importPreview" class="card" style="margin-top: 16px">
@@ -1649,7 +1663,15 @@ useBodyScrollLock(
           <span v-if="importSession.jobs_error > 0" class="status-chip status-chip-error">
             Ошибки: {{ importSession.jobs_error }}
           </span>
+          <span v-if="importSession.jobs_waiting_key > 0" class="status-chip">
+            Ждут ключ: {{ importSession.jobs_waiting_key }}
+          </span>
         </div>
+        <p v-if="importSession.jobs_waiting_key > 0 && importSession.missing_keys.length" class="nb-warn">
+          Всё отправлено на генерацию, но чтобы она пошла, нужно добавить в .env на продакшене:
+          <strong>{{ importSession.missing_keys.join(", ") }}</strong>.
+          После перезапуска сервера задания уйдут в работу сами.
+        </p>
         <div v-if="importSession.jobs_total > 0" class="test-progress-bar" style="margin-top: 12px">
           <div
             class="test-progress-fill"
@@ -1867,7 +1889,7 @@ useBodyScrollLock(
                   <strong>{{ dish.name }}</strong>
                   <p class="muted" style="margin: 4px 0 0 0">
                     {{ getRestaurantName(dish.restaurant_id) }} · фото:
-                    {{ dish.photo_dish_path ? "да" : "нет" }} · аудио: {{ dish.audio_path ? "да" : "нет" }} · видео:
+                    {{ dish.photo_dish_path ? "да" : "нет" }} · аудио: {{ dish.audio_path ? "да" : dish.audio_pending ? "отправлено на генерацию" : "нет" }} · видео:
                     {{ dish.video_path ? "да" : "нет" }}
                   </p>
                 </div>

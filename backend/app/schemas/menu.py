@@ -182,6 +182,11 @@ class MenuImportSessionPublic(BaseModel):
     jobs_processing: int = 0
     jobs_done: int = 0
     jobs_error: int = 0
+    # Отправлено на генерацию, но ждёт ключа провайдера на сервере.
+    jobs_waiting_key: int = 0
+    jobs_blocked: int = 0  # входит в jobs_pending: видео ждёт свои исходники
+    # Каких переменных не хватает в .env продакшена, чтобы генерация пошла.
+    missing_keys: list[str] = []
 
 
 class MenuImportSessionDetail(MenuImportSessionPublic):
