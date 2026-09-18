@@ -86,6 +86,10 @@ class QuizAttempt(Base):
     total_questions: Mapped[int] = mapped_column(Integer, nullable=False)
     correct_answers: Mapped[int] = mapped_column(Integer, nullable=False)
     incorrect_answers: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Номер попытки, выданный телефоном при старте теста. Отправку с телефона
+    # повторяют — связь в зале рвётся, ответ сервера теряется, — и без этого
+    # номера каждый повтор записывал бы ещё одну попытку.
+    client_attempt_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 

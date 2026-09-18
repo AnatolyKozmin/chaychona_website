@@ -126,8 +126,13 @@ export const useAuthStore = defineStore("auth", () => {
       const { data } = await api.post<TokenPair>("/auth/refresh", { refresh_token: token });
       setTokens(data.access_token, data.refresh_token);
       await fetchMe();
-    } catch {
-      logout();
+    } catch (error: any) {
+      // Выходим, только если сервер отверг сессию. Нет связи — не повод
+      // выкидывать человека из аккаунта посреди теста.
+      const status = error?.response?.status;
+      if (status === 401 || status === 403 || status === 422) {
+        logout();
+      }
     }
   }
 

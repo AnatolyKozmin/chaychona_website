@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api } from "../api/client";
 import { useBodyScrollLock } from "../composables/useBodyScrollLock";
+import { answeredCount, clearDraft, loadDraft, newAttemptId, saveDraft, type TestDraft } from "../lib/testDraft";
+import { useAuthStore } from "../stores/auth";
 
 type QuestionType = "single" | "multiple";
 
@@ -101,6 +103,15 @@ const attempts = ref<AttemptItem[]>([]);
 const attemptsModalOpen = ref(false);
 const selectedAttemptDetail = ref<AttemptDetail | null>(null);
 const attemptsQuery = ref("");
+
+const auth = useAuthStore();
+const userId = computed(() => auth.user?.id ?? null);
+/** Номер текущей попытки — уходит на сервер, чтобы повтор отправки не создал дубль. */
+const clientAttemptId = ref<string | null>(null);
+/** Незавершённый тест из памяти телефона — предлагаем продолжить. */
+const pendingDraft = ref<TestDraft | null>(null);
+/** Последняя отправка не дошла: ответы на телефоне, повторим при появлении сети. */
+const submitFailed = ref(false);
 
 const hasActiveTest = computed(() => Boolean(activeTest.value));
 const totalAnswered = computed(() => {
@@ -234,16 +245,59 @@ function scorePercent(item: { total_questions: number; correct_answers: number }
   return Math.round((item.correct_answers / item.total_questions) * 100);
 }
 
+function persistDraft() {
+  if (!activeTest.value || result.value || !clientAttemptId.value) {
+    return;
+  }
+  saveDraft(userId.value, {
+    test: activeTest.value,
+    answers: answers.value,
+    questionIndex: questionIndex.value,
+    startedAt: startedAt.value,
+    clientAttemptId: clientAttemptId.value
+  });
+}
+
+// Пишем после каждого ответа и перехода: телефон может выгрузить вкладку
+// в любой момент, и терять надо не больше одного нажатия.
+watch([answers, questionIndex], persistDraft, { deep: true });
+
+function resumeDraft(draft: TestDraft) {
+  activeTest.value = draft.test;
+  answers.value = { ...draft.answers };
+  questionIndex.value = Math.min(draft.questionIndex, draft.test.questions.length - 1);
+  startedAt.value = draft.startedAt;
+  clientAttemptId.value = draft.clientAttemptId;
+  result.value = null;
+  pendingDraft.value = null;
+  tab.value = "available";
+}
+
+function discardDraft() {
+  clearDraft(userId.value);
+  pendingDraft.value = null;
+}
+
 async function startTest(testId: number) {
+  const draft = pendingDraft.value;
+  if (draft && draft.test.id === testId) {
+    // Тот же тест уже начат — продолжаем с сохранённого места, а не заново.
+    resumeDraft(draft);
+    return;
+  }
   loading.value = true;
   error.value = "";
   result.value = null;
+  submitFailed.value = false;
   try {
     const { data } = await api.get<TakeTest>(`/tests/${testId}/take`);
     activeTest.value = data;
     answers.value = {};
     questionIndex.value = 0;
     startedAt.value = new Date().toISOString();
+    clientAttemptId.value = newAttemptId();
+    pendingDraft.value = null;
+    persistDraft();
   } catch (e: any) {
     error.value = e?.response?.data?.detail ?? "Не удалось открыть тест";
   } finally {
@@ -252,9 +306,13 @@ async function startTest(testId: number) {
 }
 
 async function submitTest() {
-  if (!activeTest.value) {
+  if (!activeTest.value || submitting.value) {
     return;
   }
+  if (!clientAttemptId.value) {
+    clientAttemptId.value = newAttemptId();
+  }
+  persistDraft();
   submitting.value = true;
   error.value = "";
   try {
@@ -263,28 +321,79 @@ async function submitTest() {
         question_id: question.id,
         option_ids: answers.value[question.id] ?? []
       })),
-      started_at: startedAt.value
+      started_at: startedAt.value,
+      client_attempt_id: clientAttemptId.value
     };
-    const { data } = await api.post<SubmitResult>(`/tests/${activeTest.value.id}/submit`, payload);
+    // Без потолка ожидания кнопка висела на «Отправка…» бесконечно, если связь
+    // пропала посреди запроса. Повторять безопасно: номер попытки тот же, и
+    // сервер вернёт уже записанный результат вместо новой попытки.
+    const { data } = await api.post<SubmitResult>(`/tests/${activeTest.value.id}/submit`, payload, {
+      timeout: 45000
+    });
     result.value = data;
+    submitFailed.value = false;
+    clearDraft(userId.value);
+    void loadMyAttempts();
   } catch (e: any) {
-    error.value = e?.response?.data?.detail ?? "Не удалось отправить ответы";
+    submitFailed.value = true;
+    const status = e?.response?.status;
+    if (!e?.response) {
+      error.value =
+        "Нет связи с сервером. Ответы сохранены на этом телефоне — нажмите «Завершить тест» ещё раз, " +
+        "когда появится интернет. Повторная отправка не создаст лишнюю попытку.";
+    } else if (status === 401) {
+      error.value =
+        "Сессия закончилась. Войдите заново — ответы сохранены на этом телефоне, " +
+        "тест откроется с того же места.";
+    } else {
+      const detail = typeof e.response.data?.detail === "string" ? e.response.data.detail : "Не удалось отправить ответы";
+      error.value = `${detail}. Ответы сохранены на телефоне, попробуйте ещё раз.`;
+    }
   } finally {
     submitting.value = false;
   }
 }
 
 function resetToList() {
+  // Незаконченный тест не выбрасываем: он остаётся черновиком и предлагается
+  // продолжить. Закончили — черновик уже стёрт при успешной отправке.
+  if (activeTest.value && !result.value) {
+    persistDraft();
+    pendingDraft.value = loadDraft(userId.value);
+  }
   activeTest.value = null;
   result.value = null;
   answers.value = {};
   questionIndex.value = 0;
   startedAt.value = null;
+  clientAttemptId.value = null;
+  submitFailed.value = false;
+  error.value = "";
+}
+
+/** Связь вернулась, а отправка до этого сорвалась — пробуем сами, без нажатия. */
+function onBackOnline() {
+  if (submitFailed.value && activeTest.value && !result.value) {
+    void submitTest();
+  }
 }
 
 onMounted(async () => {
+  window.addEventListener("online", onBackOnline);
+  if (!auth.user && auth.isAuthenticated) {
+    try {
+      await auth.fetchMe();
+    } catch {
+      // без профиля черновик не найти, но список тестов показать можно
+    }
+  }
+  pendingDraft.value = loadDraft(userId.value);
   await loadMyTests();
   await loadMyAttempts();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("online", onBackOnline);
 });
 useBodyScrollLock(computed(() => attemptsModalOpen.value));
 </script>
@@ -293,7 +402,7 @@ useBodyScrollLock(computed(() => attemptsModalOpen.value));
   <section class="card tests-page">
     <h2>Мои тесты</h2>
     <p class="muted">Выберите тест и пройдите его. После отправки увидите разбор, правильные ответы и историю попыток.</p>
-    <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="error && !hasActiveTest" class="error">{{ error }}</p>
 
     <div class="tests-tabs">
       <button type="button" class="tests-tab" :class="{ active: tab === 'available' }" @click="tab = 'available'">
@@ -305,6 +414,17 @@ useBodyScrollLock(computed(() => attemptsModalOpen.value));
     </div>
 
     <div v-if="tab === 'available' && !hasActiveTest">
+      <div v-if="pendingDraft" class="test-draft-banner">
+        <p class="test-draft-title">Незавершённый тест: «{{ pendingDraft.test.title }}»</p>
+        <p class="muted test-draft-meta">
+          Отвечено {{ answeredCount(pendingDraft) }} из {{ pendingDraft.test.questions.length }}.
+          Ответы сохранены на этом телефоне.
+        </p>
+        <div class="test-draft-actions">
+          <button type="button" @click="resumeDraft(pendingDraft)">Продолжить</button>
+          <button type="button" class="ghost" @click="discardDraft">Начать заново</button>
+        </div>
+      </div>
       <p v-if="loading">Загрузка...</p>
       <p v-else-if="tests.length === 0" class="muted">Для вас пока нет доступных тестов.</p>
       <div v-else class="test-card-grid">
@@ -367,6 +487,10 @@ useBodyScrollLock(computed(() => attemptsModalOpen.value));
           </div>
         </div>
 
+        <!-- Ошибку отправки показываем у кнопки: на телефоне верх страницы
+             в этот момент далеко за экраном. -->
+        <p v-if="error" class="error quiz-error">{{ error }}</p>
+
         <div class="quiz-nav">
           <button
             v-if="questionIndex > 0"
@@ -392,7 +516,7 @@ useBodyScrollLock(computed(() => attemptsModalOpen.value));
             :disabled="!currentAnswered || submitting"
             @click="submitTest"
           >
-            {{ submitting ? "Отправка..." : "Завершить тест" }}
+            {{ submitting ? "Отправка..." : submitFailed ? "Отправить ещё раз" : "Завершить тест" }}
           </button>
         </div>
       </template>

@@ -3670,6 +3670,40 @@ tr:hover td {
   margin-top: 16px;
 }
 
+.quiz-error {
+  margin: 14px 0 0;
+}
+
+/* Тест, брошенный на середине: ответы лежат в памяти телефона, и первое, что
+   человек видит на странице тестов, — предложение продолжить. */
+.test-draft-banner {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid #111827;
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.test-draft-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.test-draft-meta {
+  margin: 4px 0 12px;
+  font-size: 0.9rem;
+}
+
+.test-draft-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.test-draft-actions button {
+  width: auto;
+  flex: 1;
+}
+
 .quiz-back {
   width: auto;
   margin: 0;

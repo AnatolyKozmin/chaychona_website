@@ -103,6 +103,8 @@ class QuizAnswerSubmitItem(BaseModel):
 class QuizSubmitRequest(BaseModel):
     answers: list[QuizAnswerSubmitItem] = Field(default_factory=list)
     started_at: datetime | None = None
+    # Повтор с тем же номером вернёт уже записанную попытку, а не создаст новую.
+    client_attempt_id: str | None = Field(default=None, max_length=64)
 
 
 class QuizQuestionResultPublic(BaseModel):

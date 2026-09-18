@@ -162,7 +162,7 @@ describe("TastyNotebookView — залив меню файлом", () => {
     await flushPromises();
 
     expect(api.post).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain("Выберите файл реестра");
+    expect(wrapper.text()).toContain("Выберите файл меню");
   });
 
   it("требует название, если выбрано «создать новый ресторан»", async () => {
@@ -287,7 +287,8 @@ describe("TastyNotebookView — залив меню файлом", () => {
   });
   it("предупреждает, что озвучка запущена без ключа на сервере", async () => {
     const warning =
-      "Генерация озвучки запущена, но ключ Yandex SpeechKit (YANDEX_TTS_API_KEY) на сервере не задан — эти задания упадут с ошибкой.";
+      "Озвучка отправлена на генерацию — у блюд будет пометка «аудио отправлено на генерацию». " +
+      "Чтобы она появилась, нужно добавить YANDEX_TTS_API_KEY в .env на продакшене.";
     mockApi((url) => {
       if (url === "/menu/admin/import") {
         return { data: { dry_run: false, session: SESSION, warnings: [warning] } };
@@ -302,8 +303,9 @@ describe("TastyNotebookView — залив меню файлом", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("YANDEX_TTS_API_KEY");
-    // Залив при этом состоялся: блюда из файла на месте, упало бы только медиа.
-    expect(wrapper.text()).toContain("Повторить упавшие");
+    // Залив при этом состоялся, а задания дождутся ключа сами — перезаливать
+    // и перезапускать руками ничего не нужно.
+    expect(wrapper.text()).toContain("генерация пойдёт сама");
   });
 
   it("показывает предупреждение уже на проверке файла", async () => {

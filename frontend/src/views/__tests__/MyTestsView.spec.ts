@@ -184,17 +184,102 @@ describe("MyTestsView — прохождение теста", () => {
     await nextButton(wrapper).trigger("click");
     await flushPromises();
 
-    expect(postSpy).toHaveBeenCalledWith("/tests/7/submit", {
-      answers: [
-        { question_id: 100, option_ids: [1000] },
-        { question_id: 101, option_ids: [1012] }
-      ],
-      started_at: expect.any(String)
-    });
+    expect(postSpy).toHaveBeenCalledWith(
+      "/tests/7/submit",
+      {
+        answers: [
+          { question_id: 100, option_ids: [1000] },
+          { question_id: 101, option_ids: [1012] }
+        ],
+        started_at: expect.any(String),
+        // Номер попытки выдан при старте: повтор отправки не создаст дубль.
+        client_attempt_id: expect.any(String)
+      },
+      // Потолок ожидания: без него кнопка висела на «Отправка…» бесконечно.
+      { timeout: 45000 }
+    );
 
     expect(wrapper.find(".quiz-score").text()).toBe("50%");
     expect(wrapper.find(".quiz-score-note").text()).toContain("1 из 2 верно");
     expect(wrapper.findAll(".test-result-card")).toHaveLength(2);
     expect(wrapper.text()).toContain("Назвать состав и вес");
+  });
+});
+
+describe("MyTestsView — ответы не теряются", () => {
+  const USER = { id: "user-1", email: "anna", full_name: "Анна", restaurant: null, role: "learner", job_title: null, is_active: true, created_at: "" };
+
+  async function mountAs(user = USER) {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const { useAuthStore } = await import("../../stores/auth");
+    useAuthStore().user = user as any;
+    const wrapper = mount(MyTestsView, { global: { plugins: [pinia] } });
+    await flushPromises();
+    return wrapper;
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+    mockApi();
+  });
+
+  it("после перезагрузки предлагает продолжить тест с того же вопроса", async () => {
+    const first = await mountAs();
+    await first.find(".test-card").trigger("click");
+    await flushPromises();
+    await first.findAll(".quiz-option")[0].trigger("click");
+    await nextButton(first).trigger("click");
+    await flushPromises();
+    first.unmount();
+
+    // Телефон выгрузил вкладку — страница открывается с нуля.
+    const reopened = await mountAs();
+
+    expect(reopened.find(".test-draft-banner").text()).toContain("Отвечено 1 из 2");
+    await reopened.findAll(".test-draft-actions button")[0].trigger("click");
+    await flushPromises();
+    expect(reopened.find(".quiz-num").text()).toBe("Вопрос 2 из 2");
+  });
+
+  it("сорвавшаяся отправка оставляет ответы и повтор идёт с тем же номером попытки", async () => {
+    const postSpy = vi
+      .spyOn(api, "post")
+      .mockRejectedValueOnce(new Error("Network Error"))
+      .mockResolvedValueOnce({ data: SUBMIT_RESULT } as any);
+    const wrapper = await mountAs();
+    await wrapper.find(".test-card").trigger("click");
+    await flushPromises();
+    await wrapper.findAll(".quiz-option")[0].trigger("click");
+    await nextButton(wrapper).trigger("click");
+    await wrapper.findAll(".quiz-option")[0].trigger("click");
+
+    await nextButton(wrapper).trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".quiz-error").text()).toContain("Ответы сохранены на этом телефоне");
+    expect(nextButton(wrapper).text()).toBe("Отправить ещё раз");
+    expect(localStorage.getItem("test-draft:user-1")).not.toBeNull();
+
+    await nextButton(wrapper).trigger("click");
+    await flushPromises();
+
+    const [firstCall, retryCall] = postSpy.mock.calls as any[];
+    expect(retryCall[1].client_attempt_id).toBe(firstCall[1].client_attempt_id);
+    expect(wrapper.find(".quiz-score").exists()).toBe(true);
+    expect(localStorage.getItem("test-draft:user-1")).toBeNull();
+  });
+
+  it("не показывает черновик другому сотруднику на том же телефоне", async () => {
+    const first = await mountAs();
+    await first.find(".test-card").trigger("click");
+    await flushPromises();
+    await first.findAll(".quiz-option")[0].trigger("click");
+    first.unmount();
+
+    const other = await mountAs({ ...USER, id: "user-2" });
+
+    expect(other.find(".test-draft-banner").exists()).toBe(false);
   });
 });

@@ -83,9 +83,16 @@ api.interceptors.response.use(
       notifyTokenRefreshed(newAccessToken);
       originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
       return api(originalRequest);
-    } catch (refreshError) {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
+    } catch (refreshError: any) {
+      // Стираем вход, только если сервер сам сказал, что refresh недействителен.
+      // Когда ответ просто не дошёл (связь в зале, свёрнутый браузер), токены
+      // ещё живы: раньше их стирали и в этом случае, и сотрудник, нажавший
+      // «Завершить тест», терял и вход, и все ответы.
+      const refreshStatus = refreshError?.response?.status;
+      if (refreshStatus === 401 || refreshStatus === 403 || refreshStatus === 422) {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+      }
       notifyTokenRefreshed(null);
       return Promise.reject(refreshError);
     } finally {

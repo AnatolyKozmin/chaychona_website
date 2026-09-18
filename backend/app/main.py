@@ -301,6 +301,15 @@ def _run_startup() -> None:
         )
         connection.execute(text("ALTER TABLE menu_dish_video_jobs ADD COLUMN IF NOT EXISTS prompt TEXT"))
         connection.execute(text("ALTER TABLE menu_dish_video_jobs ADD COLUMN IF NOT EXISTS session_id INTEGER"))
+        # Номер попытки от телефона: повторная отправка теста не должна плодить
+        # попытки. Уникальность — в пределах пользователя, и только у заполненных.
+        connection.execute(text("ALTER TABLE quiz_attempts ADD COLUMN IF NOT EXISTS client_attempt_id VARCHAR(64)"))
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_quiz_attempts_user_client_attempt "
+                "ON quiz_attempts (user_id, client_attempt_id) WHERE client_attempt_id IS NOT NULL"
+            )
+        )
         # Пометка разбора у строки отчёта: Word-«тетрадь» местами свёрстана так,
         # что блюдо заезжает, но проверить его глазами стоит.
         connection.execute(text("ALTER TABLE menu_import_rows ADD COLUMN IF NOT EXISTS note TEXT"))

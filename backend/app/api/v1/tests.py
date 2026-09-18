@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
@@ -669,6 +670,52 @@ def tests_analytics(
     )
 
 
+def _replay_submitted_attempt(db: Session, attempt: QuizAttempt) -> QuizSubmitResultPublic:
+    """Ответ на повторную отправку уже записанной попытки — из сохранённых ответов.
+
+    Телефон шлёт тест ещё раз, когда не дождался ответа (связь, закрытый
+    экран). Первая отправка к этому моменту могла уже записаться — тогда
+    отдаём ровно её результат, а не считаем попытку заново.
+    """
+    saved = list(
+        db.scalars(
+            select(QuizAttemptAnswer)
+            .where(QuizAttemptAnswer.attempt_id == attempt.id)
+            .order_by(QuizAttemptAnswer.id.asc())
+        ).all()
+    )
+    return QuizSubmitResultPublic(
+        attempt_id=attempt.id,
+        started_at=attempt.started_at,
+        finished_at=attempt.finished_at,
+        duration_seconds=attempt.duration_seconds,
+        total_questions=attempt.total_questions,
+        correct_answers=attempt.correct_answers,
+        incorrect_answers=attempt.incorrect_answers,
+        results=[
+            QuizQuestionResultPublic(
+                question_id=answer.question_id or 0,
+                question_text=answer.question_text,
+                correct_options=_split_saved_options(answer.correct_options_text),
+                selected_options=_split_saved_options(answer.selected_options_text),
+                is_correct=answer.is_correct,
+            )
+            for answer in saved
+        ],
+    )
+
+
+def _find_client_attempt(db: Session, user_id, client_attempt_id: str | None) -> QuizAttempt | None:
+    if not client_attempt_id:
+        return None
+    return db.scalar(
+        select(QuizAttempt).where(
+            QuizAttempt.user_id == user_id,
+            QuizAttempt.client_attempt_id == client_attempt_id,
+        )
+    )
+
+
 @router.post("/{test_id}/submit", response_model=QuizSubmitResultPublic)
 def submit_test(
     test_id: int,
@@ -676,6 +723,11 @@ def submit_test(
     current_user: User = Depends(require_roles(Role.SUPERADMIN, Role.ADMIN, Role.LEARNER)),
     db: Session = Depends(get_db),
 ):
+    client_attempt_id = (payload.client_attempt_id or "").strip() or None
+    already = _find_client_attempt(db, current_user.id, client_attempt_id)
+    if already is not None:
+        return _replay_submitted_attempt(db, already)
+
     _ = take_test(test_id=test_id, current_user=current_user, db=db)
     questions = list(
         db.scalars(select(QuizQuestion).where(QuizQuestion.test_id == test_id).order_by(QuizQuestion.sort_order.asc())).all()
@@ -745,12 +797,23 @@ def submit_test(
         total_questions=total_questions,
         correct_answers=correct_answers,
         incorrect_answers=total_questions - correct_answers,
+        client_attempt_id=client_attempt_id,
     )
-    db.add(attempt)
-    db.flush([attempt])
-    for answer_payload in attempt_answers_payload:
-        db.add(QuizAttemptAnswer(attempt_id=attempt.id, **answer_payload))
-    db.commit()
+    try:
+        db.add(attempt)
+        db.flush([attempt])
+        for answer_payload in attempt_answers_payload:
+            db.add(QuizAttemptAnswer(attempt_id=attempt.id, **answer_payload))
+        db.commit()
+    except IntegrityError:
+        # Две отправки одной попытки пришли одновременно (двойной тап, повтор
+        # по таймауту) и обе прошли проверку выше. Уникальный индекс пропустил
+        # только первую — отдаём её результат.
+        db.rollback()
+        already = _find_client_attempt(db, current_user.id, client_attempt_id)
+        if already is None:
+            raise
+        return _replay_submitted_attempt(db, already)
 
     return QuizSubmitResultPublic(
         attempt_id=attempt.id,
