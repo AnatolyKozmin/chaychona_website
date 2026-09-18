@@ -112,6 +112,26 @@ def _build_category_admin_public(category: MenuCategory, branch_name: str | None
     )
 
 
+def _dishes_awaiting_audio(db: Session, dish_ids: list[int]) -> set[int]:
+    """Блюда, у которых озвучка заказана и ещё не сделана.
+
+    Одним запросом на всю страницу ленты: карточек до сотни, и отдельный
+    запрос на каждую превратил бы «Вкусную тетрадь» в сотню round-trip'ов.
+    """
+    if not dish_ids:
+        return set()
+    rows = db.execute(
+        select(MenuDishMediaJob.dish_id)
+        .where(
+            MenuDishMediaJob.dish_id.in_(dish_ids),
+            MenuDishMediaJob.kind == "audio",
+            MenuDishMediaJob.status.in_(("pending", "processing", "waiting_tts")),
+        )
+        .distinct()
+    ).all()
+    return {row[0] for row in rows}
+
+
 def _build_dish_admin_public(db: Session, dish: MenuDish) -> MenuDishAdminPublic:
     category = db.get(MenuCategory, dish.category_id) if dish.category_id else None
     branch_name = None
@@ -136,6 +156,7 @@ def _build_dish_admin_public(db: Session, dish: MenuDish) -> MenuDishAdminPublic
         photo_ingredients_path=dish.photo_ingredients_path,
         audio_path=dish.audio_path,
         video_path=dish.video_path,
+        audio_pending=not dish.audio_path and bool(_dishes_awaiting_audio(db, [dish.id])),
     )
 
 
@@ -217,6 +238,8 @@ def get_menu_feed(
                 branches = list(db.scalars(select(MenuBranch).where(MenuBranch.id.in_(branch_ids))).all())
                 branches_by_id = {branch.id: branch for branch in branches}
 
+    awaiting_audio = _dishes_awaiting_audio(db, [dish.id for dish in dishes])
+
     items: list[MenuDishCard] = []
     for dish in dishes:
         cat = categories_by_id.get(dish.category_id) if dish.category_id else None
@@ -239,6 +262,7 @@ def get_menu_feed(
                 image_url=_to_media_url(image_path),
                 video_url=_to_media_url(dish.video_path),
                 audio_url=_to_media_url(dish.audio_path),
+                audio_pending=not dish.audio_path and dish.id in awaiting_audio,
             )
         )
 
@@ -1011,6 +1035,7 @@ def _build_import_session_detail(db: Session, session: MenuImportSession) -> Men
                 dish_id=row.dish_id,
                 status=row.status,
                 error=row.error,
+                note=row.note,
             )
             for row in rows
         ],
@@ -1079,6 +1104,8 @@ def _build_preview(
                 has_photo_ingredients=has_photo_ingredients,
                 has_audio=has_audio,
                 exists=exists,
+                branch=row.branch,
+                note=row.note,
             )
         )
 
@@ -1107,7 +1134,10 @@ async def import_menu_file(
     current_user: User = Depends(require_roles(Role.SUPERADMIN)),
     db: Session = Depends(get_db),
 ):
-    """Залить меню одним файлом: реестр .xlsx или .zip с реестром и медиа.
+    """Залить меню одним файлом: .xlsx, .docx или .zip с реестром и медиа.
+
+    Word-«тетрадь» — это тот файл, который ведёт шеф: фотографии блюд лежат
+    прямо в ячейках, поэтому архив к нему не нужен.
 
     Текст и файлы из архива записываются сразу, а генерация недостающих
     картинок ингредиентов и озвучек уезжает в фоновую очередь — прогресс
@@ -1118,10 +1148,10 @@ async def import_menu_file(
     заплатить провайдеру.
     """
     file_name = (file.filename or "").strip() or "import.xlsx"
-    if not file_name.lower().endswith((".xlsx", ".xlsm", ".zip")):
+    if not file_name.lower().endswith((".xlsx", ".xlsm", ".docx", ".zip")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Поддерживаются только .xlsx и .zip",
+            detail="Поддерживаются только .xlsx, .docx и .zip",
         )
 
     restaurant = _resolve_import_restaurant(db, restaurant_id, restaurant_name)

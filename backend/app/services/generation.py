@@ -33,6 +33,13 @@ YANDEX_TTS_PATH = "/speech/v1/tts:synthesize"
 # Кто может делать озвучку. Значение берётся из TTS_PROVIDER.
 TTS_PROVIDERS = ("elevenlabs", "yandex")
 
+# Режим «озвучку пока не делаем»: задание остаётся в очереди, блюдо показывает
+# «аудио отправлено на генерацию». Включается явным TTS_PROVIDER=stub и сам
+# собой, когда провайдер выбран, а ключа к нему нет: падать с ошибкой на каждом
+# блюде бессмысленно — озвучка всё равно появится только после настройки ключа,
+# и тогда те же задания уедут в работу без повторного залива меню.
+TTS_STUB = "stub"
+
 # Пауза между опросами статуса задачи Magnific.
 _POLL_SECONDS = 3.0
 
@@ -57,6 +64,19 @@ def build_ingredients_prompt(dish_name: str, ingredients: str | None) -> str:
     return ", ".join(parts)
 
 
+def tts_mode() -> str:
+    """Чем сейчас озвучиваем: `elevenlabs`, `yandex` или `stub` (пока никем)."""
+    settings = get_settings()
+    provider = (settings.tts_provider or "").strip().lower()
+    if provider == TTS_STUB:
+        return TTS_STUB
+    if provider == "yandex":
+        return "yandex" if settings.yandex_tts_api_key else TTS_STUB
+    if provider == "elevenlabs":
+        return "elevenlabs" if settings.elevenlabs_api_key else TTS_STUB
+    return TTS_STUB
+
+
 def missing_key_warnings(*, image: bool, audio: bool) -> list[str]:
     """Чего не хватает под заказанную генерацию — человеческим языком.
 
@@ -75,23 +95,12 @@ def missing_key_warnings(*, image: bool, audio: bool) -> list[str]:
             "(MAGNIFIC_API_KEY) на сервере не задан — эти задания упадут с ошибкой."
         )
 
-    if audio:
-        provider = (settings.tts_provider or "").strip().lower()
-        if provider == "yandex" and not settings.yandex_tts_api_key:
-            warnings.append(
-                "Генерация озвучки запущена, но ключ Yandex SpeechKit "
-                "(YANDEX_TTS_API_KEY) на сервере не задан — эти задания упадут с ошибкой."
-            )
-        elif provider == "elevenlabs" and not settings.elevenlabs_api_key:
-            warnings.append(
-                "Генерация озвучки запущена, но ключ ElevenLabs "
-                "(ELEVENLABS_API_KEY) на сервере не задан — эти задания упадут с ошибкой."
-            )
-        elif provider not in TTS_PROVIDERS:
-            warnings.append(
-                f"Генерация озвучки запущена, но TTS_PROVIDER={settings.tts_provider!r} "
-                f"не опознан (допустимо: {', '.join(TTS_PROVIDERS)}) — эти задания упадут с ошибкой."
-            )
+    if audio and tts_mode() == TTS_STUB:
+        warnings.append(
+            "Озвучка пока не генерируется: провайдер не настроен. Блюда заедут "
+            "с пометкой «аудио отправлено на генерацию», задания дождутся ключа "
+            "в очереди. Видео соберётся после появления озвучки."
+        )
 
     return warnings
 

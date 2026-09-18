@@ -35,6 +35,7 @@ interface DishCard {
   image_url: string | null;
   video_url: string | null;
   audio_url: string | null;
+  audio_pending: boolean;
 }
 
 interface RestaurantItem {
@@ -105,6 +106,8 @@ interface ImportPreviewRow {
   has_photo_ingredients: boolean;
   has_audio: boolean;
   exists: boolean;
+  branch: string | null;
+  note: string | null;
 }
 
 interface ImportPreview {
@@ -126,6 +129,7 @@ interface ImportRow {
   dish_id: number | null;
   status: string;
   error: string | null;
+  note: string | null;
 }
 
 interface ImportJob {
@@ -793,7 +797,7 @@ function onImportDrop(event: DragEvent) {
 
 function buildImportForm(dryRun: boolean): FormData | null {
   if (!importFile.value) {
-    adminError.value = "Выберите файл реестра (.xlsx или .zip)";
+    adminError.value = "Выберите файл меню (.docx, .xlsx или .zip)";
     return null;
   }
   const form = new FormData();
@@ -1323,6 +1327,13 @@ useBodyScrollLock(
             <span v-else class="nb-tile-noimg">нет фото</span>
             <span class="nb-tile-marks">
               <span v-if="dish.audio_url" class="nb-mark" title="Есть озвучка">♪</span>
+              <span
+                v-else-if="dish.audio_pending"
+                class="nb-mark nb-mark--pending"
+                title="Аудио отправлено на генерацию"
+              >
+                ♪…
+              </span>
               <span v-if="dish.video_url" class="nb-mark" title="Есть видео">▶</span>
             </span>
           </span>
@@ -1395,8 +1406,15 @@ useBodyScrollLock(
             preload="none"
             class="nb-audio"
           />
+          <p v-else-if="currentDish.audio_pending" class="nb-audio-pending">
+            Аудио отправлено на генерацию
+          </p>
         </div>
       </template>
+
+      <p v-else-if="currentDish.audio_pending" class="nb-audio-pending">
+        Аудио отправлено на генерацию
+      </p>
 
       <!-- Аллергены показываем, только если их заполнил шеф-повар. Пустое поле
            не значит «аллергенов нет», поэтому блока просто не будет. -->
@@ -1438,9 +1456,11 @@ useBodyScrollLock(
     <div class="card">
       <h3 style="margin: 0 0 8px 0">Загрузка меню файлом</h3>
       <p class="muted" style="margin: 0 0 14px 0">
-        Реестр .xlsx с колонками «Раздел», «Блюдо», «Ингредиенты», «Текст озвучки» — или .zip,
-        внутри которого лежит этот реестр вместе с папками фотографий. Чего в файле нет,
-        сервер догенерирует сам: картинку ингредиентов, озвучку и видео.
+        Три варианта: «Вкусная тетрадь» в .docx — фотографии блюд сервер достанет
+        прямо из документа; реестр .xlsx с колонками «Раздел», «Блюдо», «Ингредиенты»,
+        «Текст озвучки»; либо .zip, внутри которого этот реестр вместе с папками
+        фотографий. Чего в файле нет, сервер догенерирует сам: картинку ингредиентов,
+        озвучку и видео.
       </p>
 
       <div
@@ -1454,7 +1474,7 @@ useBodyScrollLock(
         <input
           ref="importFileInput"
           type="file"
-          accept=".xlsx,.xlsm,.zip"
+          accept=".docx,.xlsx,.xlsm,.zip"
           class="file-drop-input"
           @change="onImportFileChange"
         />
@@ -1465,7 +1485,7 @@ useBodyScrollLock(
         </template>
         <template v-else>
           <span class="file-drop-icon">⬆️</span>
-          <span class="file-drop-name">Перетащите .xlsx или .zip сюда или нажмите для выбора</span>
+          <span class="file-drop-name">Перетащите .docx, .xlsx или .zip сюда или нажмите для выбора</span>
         </template>
       </div>
 
@@ -1567,8 +1587,15 @@ useBodyScrollLock(
             <tbody>
               <tr v-for="row in importPreview.rows" :key="row.row_number">
                 <td>{{ row.row_number }}</td>
-                <td>{{ row.name }}</td>
-                <td>{{ row.category || "—" }}</td>
+                <td>
+                  {{ row.name }}
+                  <span v-if="row.note" class="status-chip status-chip-muted" :title="row.note">
+                    проверить
+                  </span>
+                </td>
+                <td>
+                  <template v-if="row.branch">{{ row.branch }} · </template>{{ row.category || "—" }}
+                </td>
                 <td>
                   <span v-if="row.has_photo_dish" class="status-chip status-chip-success">фото</span>
                   <span v-if="row.has_photo_ingredients" class="status-chip status-chip-success">ингредиенты</span>
@@ -1646,6 +1673,31 @@ useBodyScrollLock(
                   <td>{{ job.dish_name || job.dish_id }}</td>
                   <td>{{ job.kind }}</td>
                   <td class="long-text">{{ job.error }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+
+        <template v-if="importSession.rows && importSession.rows.some((row) => row.note)">
+          <h4 style="margin: 16px 0 8px 0">Заехали, но стоит проверить</h4>
+          <p class="muted" style="margin: 0 0 8px 0">
+            Эти блюда созданы. Разбор Word-документа не был уверен в вёрстке — сверьте состав и название.
+          </p>
+          <div class="table-wrap" style="max-height: 240px; overflow: auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>№</th>
+                  <th>Блюдо</th>
+                  <th>Что проверить</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in importSession.rows.filter((item) => item.note)" :key="`note-${row.row_number}`">
+                  <td>{{ row.row_number }}</td>
+                  <td>{{ row.dish_name || "—" }}</td>
+                  <td class="long-text">{{ row.note }}</td>
                 </tr>
               </tbody>
             </table>

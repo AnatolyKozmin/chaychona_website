@@ -138,7 +138,7 @@ def test_registry_without_dishes_is_an_error():
 
 
 def test_unsupported_extension_rejected():
-    with pytest.raises(RegistryParseError, match="только .xlsx и .zip"):
+    with pytest.raises(RegistryParseError, match="только .xlsx, .docx и .zip"):
         parse_registry(b"whatever", "меню.pdf")
 
 

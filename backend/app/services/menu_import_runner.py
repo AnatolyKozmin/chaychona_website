@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.menu import (
+    MenuBranch,
     MenuCategory,
     MenuDish,
     MenuDishMediaJob,
@@ -52,16 +53,10 @@ def _store(content: bytes | None, source_path: str | None, allowed: set[str]) ->
     return save_upload_bytes(content, suffix)
 
 
-def _resolve_category(
-    db: Session,
-    cache: dict[str, int],
-    name: str | None,
-    restaurant_id: uuid.UUID | None,
-) -> int | None:
-    """Найти id категории ресторана по имени или создать её.
+def _resolve_branch(db: Session, cache: dict[str, int], name: str | None) -> int | None:
+    """Найти ветку меню («Восточная кухня») по имени или завести её.
 
-    Кэшируем именно id, а не ORM-объект: после построчного коммита объекты
-    протухают, и каждое обращение к `.name` стоило бы отдельного запроса.
+    Ветки общие на все рестораны — как и раздел меню в бумажной тетради.
     """
     key = _normalized(name)
     if not key:
@@ -69,14 +64,55 @@ def _resolve_category(
     cached = cache.get(key)
     if cached is not None:
         return cached
+    branch = db.scalar(select(MenuBranch).where(func.lower(MenuBranch.name) == key))
+    if branch is None:
+        branch = MenuBranch(name=" ".join(name.split())[:64], is_active=True)
+        db.add(branch)
+        db.flush()
+    cache[key] = branch.id
+    return branch.id
+
+
+def _resolve_category(
+    db: Session,
+    cache: dict[tuple[int | None, str], int],
+    name: str | None,
+    restaurant_id: uuid.UUID | None,
+    branch_id: int | None = None,
+) -> int | None:
+    """Найти id категории ресторана по имени или создать её.
+
+    Ключ кэша — пара «ветка + имя»: раздел «Салаты» есть и в восточной кухне,
+    и в мировой, это разные категории, и схлопывать их нельзя.
+
+    Кэшируем именно id, а не ORM-объект: после построчного коммита объекты
+    протухают, и каждое обращение к `.name` стоило бы отдельного запроса.
+    """
+    key = _normalized(name)
+    if not key:
+        return None
+    cached = cache.get((branch_id, key))
+    if cached is not None:
+        return cached
+    # Категория, заведённая до появления веток, лежит без branch_id — подбираем
+    # её, а не плодим дубль рядом.
+    orphan = cache.pop((None, key), None) if branch_id is not None else None
+    if orphan is not None:
+        category = db.get(MenuCategory, orphan)
+        if category is not None:
+            category.branch_id = branch_id
+            db.flush()
+            cache[(branch_id, key)] = category.id
+            return category.id
     category = MenuCategory(
         name=" ".join(name.split()),
         restaurant_id=restaurant_id,
+        branch_id=branch_id,
         is_active=True,
     )
     db.add(category)
     db.flush()
-    cache[key] = category.id
+    cache[(branch_id, key)] = category.id
     return category.id
 
 
@@ -125,12 +161,16 @@ def run_import(
     db.commit()
     session_id = session.id
 
-    category_query = select(MenuCategory.id, MenuCategory.name)
+    category_query = select(MenuCategory.id, MenuCategory.name, MenuCategory.branch_id)
     if restaurant_id:
         category_query = category_query.where(MenuCategory.restaurant_id == restaurant_id)
     else:
         category_query = category_query.where(MenuCategory.restaurant_id.is_(None))
-    category_cache = {_normalized(name): cid for cid, name in db.execute(category_query).all()}
+    category_cache = {
+        (branch_id, _normalized(name)): cid
+        for cid, name, branch_id in db.execute(category_query).all()
+    }
+    branch_cache: dict[str, int] = {}
 
     created = updated = failed = 0
 
@@ -151,7 +191,8 @@ def run_import(
             if row.price_rubles:
                 dish.price_rubles = row.price_rubles
 
-            category_id = _resolve_category(db, category_cache, row.category, restaurant_id)
+            branch_id = _resolve_branch(db, branch_cache, row.branch)
+            category_id = _resolve_category(db, category_cache, row.category, restaurant_id, branch_id)
             if category_id is not None:
                 dish.category_id = category_id
 
@@ -189,6 +230,7 @@ def run_import(
                     category_name=_clip(row.category),
                     dish_id=dish.id,
                     status="created" if is_new else "updated",
+                    note=row.note,
                 )
             )
             # Коммитим каждую строку отдельно: иначе одна битая ячейка в конце

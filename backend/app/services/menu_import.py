@@ -55,6 +55,10 @@ class ParsedRow:
     photo_dish: str | None = None
     photo_ingredients: str | None = None
     audio: str | None = None
+    # Заполняет только Word-разбор: в документе два уровня — кухня и раздел.
+    branch: str | None = None
+    # Чем разбор не уверен. Строку всё равно заливаем, но в отчёте помечаем.
+    note: str | None = None
 
 
 @dataclass
@@ -254,4 +258,11 @@ def parse_registry(source: bytes | str | Path, file_name: str) -> ParsedRegistry
         data = handle if isinstance(handle, bytes) else Path(handle).read_bytes()
         return ParsedRegistry(rows=_load_workbook_rows(data), source_name=file_name)
 
-    raise RegistryParseError("Поддерживаются только .xlsx и .zip")
+    if lowered.endswith(".docx"):
+        # Импорт здесь, а не наверху файла: docx-разбор сам тянет ParsedRegistry
+        # из этого модуля, и на уровне модуля вышел бы circular import.
+        from app.services.menu_docx_import import parse_docx
+
+        return parse_docx(handle, file_name)
+
+    raise RegistryParseError("Поддерживаются только .xlsx, .docx и .zip")

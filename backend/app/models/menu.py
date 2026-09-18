@@ -179,4 +179,7 @@ class MenuImportRow(Base):
     # created | updated | skipped | error
     status: Mapped[str] = mapped_column(String(20), default="created", nullable=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Чем разбор был не уверен (в основном Word: перевёрнутые таблицы, пустой состав).
+    # Это не ошибка — блюдо заехало, но глазами проверить стоит.
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

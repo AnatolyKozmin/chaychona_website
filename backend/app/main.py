@@ -301,6 +301,9 @@ def _run_startup() -> None:
         )
         connection.execute(text("ALTER TABLE menu_dish_video_jobs ADD COLUMN IF NOT EXISTS prompt TEXT"))
         connection.execute(text("ALTER TABLE menu_dish_video_jobs ADD COLUMN IF NOT EXISTS session_id INTEGER"))
+        # Пометка разбора у строки отчёта: Word-«тетрадь» местами свёрстана так,
+        # что блюдо заезжает, но проверить его глазами стоит.
+        connection.execute(text("ALTER TABLE menu_import_rows ADD COLUMN IF NOT EXISTS note TEXT"))
         connection.execute(
             text("CREATE INDEX IF NOT EXISTS ix_menu_dish_video_jobs_kind ON menu_dish_video_jobs (kind)")
         )

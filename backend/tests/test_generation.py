@@ -349,15 +349,15 @@ def test_no_warnings_when_all_keys_are_in_place(settings):
     assert missing_key_warnings(image=True, audio=True) == []
 
 
-def test_warns_that_audio_is_queued_without_a_yandex_key(settings):
+def test_warns_that_audio_will_wait_without_a_yandex_key(settings):
+    """Без ключа озвучка не падает, а ждёт — предупреждение должно обещать именно это."""
     settings.tts_provider = "yandex"
     settings.yandex_tts_api_key = None
 
     warnings = missing_key_warnings(image=False, audio=True)
 
     assert len(warnings) == 1
-    assert "озвучки запущена" in warnings[0]
-    assert "YANDEX_TTS_API_KEY" in warnings[0]
+    assert "аудио отправлено на генерацию" in warnings[0]
 
 
 def test_warns_about_a_missing_elevenlabs_key(settings):
@@ -366,7 +366,17 @@ def test_warns_about_a_missing_elevenlabs_key(settings):
     warnings = missing_key_warnings(image=False, audio=True)
 
     assert len(warnings) == 1
-    assert "ELEVENLABS_API_KEY" in warnings[0]
+    assert "не генерируется" in warnings[0]
+
+
+def test_stub_mode_is_reported_even_with_keys_around(settings):
+    """Явный TTS_PROVIDER=stub выключает озвучку, даже когда ключи прописаны."""
+    settings.tts_provider = "stub"
+
+    warnings = missing_key_warnings(image=False, audio=True)
+
+    assert len(warnings) == 1
+    assert "аудио отправлено на генерацию" in warnings[0]
 
 
 def test_key_of_the_other_provider_does_not_help(settings):
@@ -379,12 +389,13 @@ def test_key_of_the_other_provider_does_not_help(settings):
 
 
 def test_unknown_provider_is_reported_before_the_import_starts(settings):
+    """Непонятный провайдер — та же отложенная озвучка, а не сотня упавших заданий."""
     settings.tts_provider = "magnific"
 
     warnings = missing_key_warnings(image=False, audio=True)
 
     assert len(warnings) == 1
-    assert "TTS_PROVIDER" in warnings[0]
+    assert "аудио отправлено на генерацию" in warnings[0]
 
 
 def test_missing_image_key_is_reported_too(settings):

@@ -51,6 +51,9 @@ class MenuDishCard(BaseModel):
     image_url: str | None
     video_url: str | None
     audio_url: str | None
+    # Озвучки ещё нет, но она заказана и ждёт в очереди — официанту показываем
+    # «аудио отправлено на генерацию» вместо пустого места.
+    audio_pending: bool = False
 
 
 class MenuDishAdminPublic(BaseModel):
@@ -70,6 +73,7 @@ class MenuDishAdminPublic(BaseModel):
     photo_ingredients_path: str | None
     audio_path: str | None
     video_path: str | None
+    audio_pending: bool = False
     video_job_queued: bool = False  # видео поставлено на пересборку (сменили фото/озвучку)
 
 
@@ -153,6 +157,7 @@ class MenuImportRowPublic(BaseModel):
     dish_id: int | None
     status: str  # created | updated | skipped | error
     error: str | None
+    note: str | None = None
 
 
 class MenuImportSessionPublic(BaseModel):
@@ -194,6 +199,8 @@ class MenuImportPreviewRow(BaseModel):
     has_photo_ingredients: bool
     has_audio: bool
     exists: bool  # блюдо с таким именем уже есть в этом ресторане
+    branch: str | None = None  # кухня из Word-документа
+    note: str | None = None  # чем разбор не уверен
 
 
 class MenuImportPreview(BaseModel):

@@ -104,6 +104,7 @@ def test_image_job_reports_provider_error(monkeypatch):
 
 
 def test_audio_job_saves_voiceover(monkeypatch):
+    monkeypatch.setattr(vw, "tts_mode", lambda: "elevenlabs")
     monkeypatch.setattr(vw, "synthesize_speech", lambda text: (b"mp3-bytes", ".mp3"))
     monkeypatch.setattr(vw, "save_upload_bytes", lambda content, ext: f"uploads/voice{ext}")
     dish = _dish()
@@ -114,6 +115,45 @@ def test_audio_job_saves_voiceover(monkeypatch):
 
     assert job.status == "done"
     assert dish.audio_path == "uploads/voice.mp3"
+
+
+def test_audio_job_waits_when_no_tts_provider_is_configured(monkeypatch):
+    """Без провайдера озвучка не падает: задание ждёт ключа, блюдо покажет заглушку.
+
+    Иначе каждый залив меню оставлял бы сотню «ошибок», которые на самом деле
+    означают лишь «озвучку пока никто не делает».
+    """
+    monkeypatch.setattr(vw, "tts_mode", lambda: vw.TTS_STUB)
+    dish = _dish()
+    job = _job("audio", prompt="Идеальный набор под крепкие напитки")
+    db = FakeSession({})
+
+    vw._process_audio_job(db, job, dish)
+
+    assert job.status == vw.WAITING_TTS_STATUS
+    assert job.error is None
+    assert dish.audio_path is None
+
+
+def test_waiting_audio_keeps_video_blocked():
+    """Видео ждёт отложенную озвучку, а не закрывается ошибкой.
+
+    `_release_video_jobs` закрывает видео, когда смежные стадии «доработали»;
+    отложенная озвучка доработавшей не считается, иначе каждое блюдо из залива
+    без TTS получало бы ошибку по видео.
+    """
+    dish = _dish(photo_ingredients_path="uploads/plov.png")  # озвучки нет
+    video = _job("video", status="blocked", job_id=2)
+    db = FakeSession(
+        {(MenuDish, 10): dish},
+        scalars_result=[video],
+        scalar_result=1,  # одно незакрытое смежное задание — та самая озвучка
+    )
+
+    vw._release_video_jobs(db, dish.id)
+
+    assert video.status == "blocked"
+    assert video.error is None
 
 
 def test_audio_job_without_text_fails():

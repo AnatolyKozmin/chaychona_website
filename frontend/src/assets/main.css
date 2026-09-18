@@ -3233,6 +3233,21 @@ tr:hover td {
   margin-top: 13px;
 }
 
+/* Озвучка заказана, но её ещё не сделали. Официант должен понимать, что
+   плеера нет не потому, что блюдо забыли, а потому что аудио в работе. */
+.nb-audio-pending {
+  margin: 13px 0 0 0;
+  padding: 9px 11px;
+  border: 1px dashed #c7d2e4;
+  background: #f7f9fc;
+  color: #5b6879;
+  font-size: 0.86rem;
+}
+
+.nb-mark--pending {
+  background: rgba(12, 16, 24, 0.38);
+}
+
 .nb-ings {
   display: flex;
   flex-wrap: wrap;

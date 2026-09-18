@@ -29,9 +29,11 @@ from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.menu import MenuDish, MenuDishMediaJob, MenuImportSession
 from app.services.generation import (
+    TTS_STUB,
     GenerationError,
     generate_ingredients_image,
     synthesize_speech,
+    tts_mode,
 )
 from app.services.media import UPLOAD_DIR, resolve_media_abspath, save_upload_bytes
 from app.services.video import VideoCompositionError, compose_still_video
@@ -41,8 +43,13 @@ logger = logging.getLogger(__name__)
 _worker_started = False
 _stop_event = threading.Event()
 
+# `waiting_tts` — озвучка, которую пока некому сделать: провайдер не настроен.
+# Это не ошибка и не работа — задание ждёт ключа, поэтому в claim не попадает,
+# а видео по такому блюду остаётся заблокированным, а не закрывается ошибкой.
+WAITING_TTS_STATUS = "waiting_tts"
+
 # Статусы, при которых задание ещё в работе.
-UNFINISHED_STATUSES = ("blocked", "pending", "processing")
+UNFINISHED_STATUSES = ("blocked", "pending", "processing", WAITING_TTS_STATUS)
 
 
 def _claim_next_job(db: Session) -> int | None:
@@ -96,6 +103,13 @@ def _process_audio_job(db: Session, job: MenuDishMediaJob, dish: MenuDish) -> No
     voice_text = (job.prompt or "").strip()
     if not voice_text:
         _fail(db, job, "Нет текста для озвучки")
+        return
+    if tts_mode() == TTS_STUB:
+        job.status = WAITING_TTS_STATUS
+        job.error = None
+        job.updated_at = datetime.utcnow()
+        db.commit()
+        logger.info("Задание %s: озвучка отложена — провайдер не настроен", job.id)
         return
     try:
         content, ext = synthesize_speech(voice_text)
@@ -220,6 +234,20 @@ def _process_job(db: Session, job_id: int) -> None:
     _close_session_if_done(db, job.session_id)
 
 
+def _wake_waiting_audio_jobs(db: Session) -> int:
+    """Вернуть отложенные озвучки в очередь, когда провайдер наконец настроен."""
+    if tts_mode() == TTS_STUB:
+        return 0
+    woken = db.execute(
+        text(
+            "UPDATE menu_dish_video_jobs SET status='pending', updated_at=NOW() "
+            f"WHERE kind='audio' AND status='{WAITING_TTS_STATUS}' RETURNING id"
+        )
+    ).fetchall()
+    db.commit()
+    return len(woken)
+
+
 def _run_loop() -> None:
     settings = get_settings()
     poll = settings.video_worker_poll_seconds
@@ -228,6 +256,11 @@ def _run_loop() -> None:
         job_id: int | None = None
         db = SessionLocal()
         try:
+            # Ключ озвучки могли прописать уже после залива меню — тогда
+            # отложенные задания надо поднять, не заставляя перезаливать файл.
+            woken = _wake_waiting_audio_jobs(db)
+            if woken:
+                logger.info("Озвучка: вернули в очередь %s отложенных заданий", woken)
             job_id = _claim_next_job(db)
             if job_id is not None:
                 _process_job(db, job_id)
